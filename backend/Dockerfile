@@ -1,4 +1,4 @@
-FROM python:3.13-slim AS deps
+FROM python:3.14-slim AS deps
 LABEL keep-cache="true"
 
 # System deps needed to build psycopg2 + curl for the compose healthcheck
