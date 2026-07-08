@@ -86,26 +86,118 @@ Template-Django-React/
 - **PostgreSQL 15** is the system of record (`psycopg2-binary`).
 - **`ruff`** for lint/format, **`pytest`** + **`pytest-django`** for tests.
 
-### 3.2 The Django app: `core/`
+### 3.2 The Django apps
 
-There is one starter app. Extend it or add domain-specific apps alongside:
+Four apps ship in the template — `core` is the starter, the other three carry the LLM harness. Extend / rename them for your domain:
 
 ```
-backend/core/
-├── models.py                    ORM models
-├── serializers.py               DRF serializers
-├── views.py                     HTTP handlers (thin)
-├── urls.py                      /api/* routes
-├── admin.py                     Django admin registrations
-├── apps.py
-├── migrations/                  Never hand-edit
-├── tests/                       pytest test suite
-├── management/commands/         Scheduled / one-off commands
-│   └── seed_users.py            Bootstraps INITIAL_USERS on first deploy
-└── utils/                       ⚠️ All business logic lives here
+backend/
+├── core/                        Starter app: auth, /me, /health
+│   ├── models.py                ORM models
+│   ├── serializers.py           DRF serializers
+│   ├── views.py                 HTTP handlers (thin)
+│   ├── urls.py                  /api/* routes
+│   ├── admin.py                 Django admin registrations
+│   ├── apps.py
+│   ├── migrations/              Never hand-edit
+│   ├── tests/                   pytest test suite
+│   ├── management/commands/     Scheduled / one-off commands
+│   │   └── seed_users.py        Bootstraps INITIAL_USERS on first deploy
+│   └── utils/                   ⚠️ All business logic lives here
+├── llm/                         LLM harness (OpenRouter + tool loop + audit)
+│   ├── apps.py                  ready() runs AST validator on the tool registry
+│   ├── models.py                AgentRun, LLMToolCall (unified audit trail)
+│   ├── admin.py
+│   ├── tests/
+│   └── utils/
+│       ├── openrouter.py        chat() — LLMResponse, cache_control marker
+│       ├── tool_loop.py         chat_with_tools() — multi-turn dispatcher
+│       ├── prompts.py           Domain-neutral defaults
+│       ├── cost_cap.py          precheck_only / record_after_call (monthly USD)
+│       ├── agent.py             run_agent() high-level entry point
+│       └── tools/
+│           ├── decorator.py     @read_only_tool + REGISTRY + ToolSpec
+│           ├── validator.py     AST walker forbidding writes in tool bodies
+│           └── builtin.py       Example tools (current_time, list_recent_users)
+├── chat/                        Per-user chat surface using the harness
+│   ├── models.py                ChatMessage (user FK, date-scoped thread)
+│   ├── views.py                 POST /api/chat/ + GET /api/chat/today/
+│   └── utils/engine.py          answer() — persist, call harness, handle cap
+└── mcp_server/                  MCP JSON-RPC endpoint (Streamable HTTP, 2025-03-26)
+    ├── models.py                McpToken, McpCallLog (append-only audit)
+    ├── views.py                 mcp_endpoint + McpTokenViewSet
+    ├── urls.py                  /api/mcp/  +  /api/mcp/tokens/
+    ├── management/commands/
+    │   └── issue_mcp_token.py   CLI to mint bearer tokens
+    └── utils/
+        ├── auth.py              Bearer-token verification
+        ├── rate_limit.py        Per-token, log-based sliding window
+        ├── tool_bridge.py       Registry → MCP tool schema + scope filter
+        ├── protocol.py          JSON-RPC dispatch (initialize/tools/list/tools/call/ping)
+        └── privacy.py           Belt-and-suspenders walker (no-op by default)
 ```
 
-**Convention (CLAUDE.md):** views stay thin; logic lives in `core/utils/`. Models hold data, not behaviour.
+**Convention (CLAUDE.md):** views stay thin; logic lives in `<app>/utils/`. Models hold data, not behaviour.
+
+### 3.2.1 LLM harness — how the pieces fit
+
+```
+   HTTP view (chat.views.send)   or   cron job / webhook
+              │                              │
+              └───────────► llm.utils.agent.run_agent()
+                                      │
+              creates llm.models.AgentRun (kind, trigger_type, status=RUNNING)
+                                      │
+                                      ▼
+                    llm.utils.tool_loop.chat_with_tools()
+                          ├── OpenRouter /chat/completions (with tools=REGISTRY.payload)
+                          ├── on tool_calls: dispatch to REGISTRY[name].handler
+                          ├── loop up to LLM_MAX_TOOL_TURNS
+                          └── final forced no-tools turn if cap hit
+                                      │
+                                      ▼
+              AgentRun.status = COMPLETED, cost/turn totals recorded
+              bulk_create(LLMToolCall) rows for each tool dispatch
+
+Cost cap: llm.utils.cost_cap.precheck_only() at start, record_after_call() after
+each API call. Blown-cap runs finish as AgentRun.Status.CAPPED with a friendly
+message rather than an exception.
+
+Boot-time safety: llm.apps.LlmConfig.ready() force-imports the registry and runs
+an AST walker over every tool body. Any .save / .delete / .create / .update / …
+call in a @read_only_tool aborts boot with file+line.
+```
+
+### 3.2.2 MCP server — how requests flow
+
+```
+Claude Desktop  ──►  POST /api/mcp/  ──►  mcp_server.views.mcp_endpoint
+                     Authorization:                 │
+                     Bearer mcp_<secret>            │
+                                                    ▼
+                                         authenticate() → verify SHA-256
+                                                    ▼
+                                         is_rate_limited() → count McpCallLog
+                                                    ▼
+                                         parse JSON-RPC body (single or batch)
+                                                    ▼
+                                         dispatch(method, params, token)
+                                          ├─ initialize / ping / tools/list
+                                          └─ tools/call
+                                              ├─ tool_bridge.find_callable_tool()
+                                              │    (registry + scope + source-gate)
+                                              ├─ coerce_arguments() from JSON Schema
+                                              ├─ spec.handler(**kwargs)
+                                              └─ privacy.enforce() belt-and-suspenders
+                                                    ▼
+                                         McpCallLog row (append-only audit)
+                                                    ▼
+                                         JSON-RPC envelope back to client
+```
+
+Token lifecycle: `manage.py issue_mcp_token --name "Claude Desktop"` prints the
+raw secret exactly once; the DB stores only its SHA-256 hash. Revoke via the
+admin, the `/api/mcp/tokens/<id>/revoke/` endpoint, or `McpToken.revoke()`.
 
 ### 3.3 Configuration (`backend/config/`)
 
@@ -120,6 +212,12 @@ backend/core/
 
 **Required env vars** (see README + `backend/.env.example`): `SECRET_KEY`, `DJANGO_DEBUG`, `ALLOWED_HOSTS`, `CORS_ALLOWED_ORIGINS`, `CSRF_TRUSTED_ORIGINS`, `DB_*`, `FRONTEND_URL`, `EMAIL_*`, `INITIAL_USERS`, `HEALTHCHECK_URL`.
 
+**LLM / MCP env vars** (all optional; the harness fails cleanly when unset):
+`OPENROUTER_API_KEY`, `OPENROUTER_DEFAULT_MODEL`, `OPENROUTER_HEAVY_MODEL`,
+`OPENROUTER_HTTP_REFERER`, `OPENROUTER_APP_TITLE`,
+`OPENROUTER_MONTHLY_USD_CAP` (0 = disabled), `LLM_MAX_TOOL_TURNS`,
+`LLM_TOOLS_SKIP_VALIDATION` (tests only), `MCP_ENABLED` (kill switch).
+
 ### 3.4 HTTP API surface (`core/urls.py`)
 
 All endpoints under `/api/`. JSON in, JSON out. `IsAuthenticated` unless noted.
@@ -130,6 +228,14 @@ All endpoints under `/api/`. JSON in, JSON out. `IsAuthenticated` unless noted.
 
 **Example authenticated endpoint**
 - `GET  /api/me/` — returns the current user.
+
+**Chat (LLM harness demo surface)**
+- `POST /api/chat/`         — send a message; response includes the assistant reply.
+- `GET  /api/chat/today/`   — today's thread for the requesting user.
+
+**MCP JSON-RPC (bearer-token auth; not JWT)**
+- `POST /api/mcp/`          — the Model Context Protocol endpoint. See §3.2.2.
+- `GET/POST /api/mcp/tokens/` — admin-only token management API.
 
 Add project-specific endpoints alongside `core/urls.py` or in new apps.
 

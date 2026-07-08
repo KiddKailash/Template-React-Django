@@ -28,7 +28,7 @@ dependencies = [
 [tool.pytest.ini_options]
 DJANGO_SETTINGS_MODULE = "config.settings"
 django_find_project = true
-addopts = "--cov=core --cov-report=term-missing"
+addopts = "--cov=core --cov=llm --cov=chat --cov=mcp_server --cov-report=term-missing"
 
 [tool.ruff]
 line-length = 100

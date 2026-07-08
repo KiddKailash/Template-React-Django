@@ -4,6 +4,8 @@ A pre-wired template for a Django REST backend + React (Vite + MUI PWA) frontend
 
 The template ships plugged-in and connected: JWT auth, health endpoint, protected routes, light/dark theme, PWA scaffolding, nginx reverse proxy, CI/CD workflow, dependabot, and a `make data-sync` one-liner for pulling prod state to your dev machine.
 
+**Also included: a full LLM harness.** An OpenRouter client with prompt-caching, a multi-turn tool-use loop with a boot-time AST validator that forbids DB writes inside `@read_only_tool`, a per-user `chat/` surface, a monthly USD cost cap, and an MCP JSON-RPC 2.0 server (bearer-token auth, append-only audit log, per-token rate limit). See `backend/llm/`, `backend/chat/`, `backend/mcp_server/`.
+
 For the architectural overview, read [ARCHITECTURE.md](./ARCHITECTURE.md). For UI decisions, read [DESIGN.md](./DESIGN.md). Agent-specific instructions are in [CLAUDE.md](./CLAUDE.md).
 
 ---
@@ -119,6 +121,18 @@ DB_PORT=5432
 # ── Chroma (optional — remove if not using RAG) ───────────────────────────────
 CHROMA_HOST=localhost
 CHROMA_PORT=8001
+
+# ── OpenRouter / LLM harness ──────────────────────────────────────────────────
+OPENROUTER_API_KEY=
+OPENROUTER_HTTP_REFERER=http://localhost:5173
+OPENROUTER_APP_TITLE=My App
+OPENROUTER_DEFAULT_MODEL=anthropic/claude-haiku-4.5
+OPENROUTER_HEAVY_MODEL=anthropic/claude-sonnet-4.5
+OPENROUTER_MONTHLY_USD_CAP=0        # 0 disables the cap
+LLM_MAX_TOOL_TURNS=10
+
+# ── MCP server ────────────────────────────────────────────────────────────────
+MCP_ENABLED=true
 ```
 
 ### `frontend/.env`
@@ -205,6 +219,11 @@ make data-sync
 | Root URL routing | `backend/config/urls.py` |
 | Domain app (rename me) | `backend/core/` |
 | Business logic | `backend/core/utils/` |
+| LLM harness (OpenRouter + tool loop + audit) | `backend/llm/` |
+| `@read_only_tool` registry + AST validator | `backend/llm/utils/tools/` |
+| Per-user chat surface | `backend/chat/` |
+| MCP JSON-RPC server + bearer tokens | `backend/mcp_server/` |
+| Issue a new MCP token | `uv run python manage.py issue_mcp_token --name "Claude Desktop"` |
 | Cron entrypoint | `backend/cron/orchestrate.sh` |
 | React entry / routes | `frontend/src/App.jsx` |
 | Auth flow | `frontend/src/contexts/UserContext.jsx`, `frontend/src/services/authService.js` |

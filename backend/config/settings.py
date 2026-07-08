@@ -13,7 +13,6 @@ load_dotenv()
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 
-
 # ---------------------------------------------------------------------------
 # Core security
 # ---------------------------------------------------------------------------
@@ -23,9 +22,7 @@ if not SECRET_KEY:
     if os.getenv("DJANGO_DEBUG", "false").lower() == "true":
         SECRET_KEY = "django-insecure-template-dev-only-do-not-use-in-production"
     else:
-        raise ImproperlyConfigured(
-            "SECRET_KEY environment variable must be set in production"
-        )
+        raise ImproperlyConfigured("SECRET_KEY environment variable must be set in production")
 
 DEBUG = os.getenv("DJANGO_DEBUG", "false").lower() == "true"
 
@@ -49,6 +46,9 @@ INSTALLED_APPS = [
     "corsheaders",
     # Local
     "core",
+    "llm",
+    "chat",
+    "mcp_server",
 ]
 
 MIDDLEWARE = [
@@ -202,9 +202,7 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 # Email
 # ---------------------------------------------------------------------------
 
-EMAIL_BACKEND = os.getenv(
-    "EMAIL_BACKEND", "django.core.mail.backends.console.EmailBackend"
-)
+EMAIL_BACKEND = os.getenv("EMAIL_BACKEND", "django.core.mail.backends.console.EmailBackend")
 EMAIL_HOST = os.getenv("EMAIL_HOST", "smtp.gmail.com")
 EMAIL_PORT = int(os.getenv("EMAIL_PORT", "587"))
 EMAIL_USE_TLS = os.getenv("EMAIL_USE_TLS", "true").lower() == "true"
@@ -226,3 +224,39 @@ FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
 # Optional Chroma (RAG) — remove if unused
 CHROMA_HOST = os.getenv("CHROMA_HOST", "localhost")
 CHROMA_PORT = int(os.getenv("CHROMA_PORT", "8001"))
+
+
+# ---------------------------------------------------------------------------
+# OpenRouter / LLM harness
+# ---------------------------------------------------------------------------
+
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
+OPENROUTER_BASE_URL = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
+OPENROUTER_REQUEST_TIMEOUT = int(os.getenv("OPENROUTER_REQUEST_TIMEOUT", "60"))
+
+# Attribution headers OpenRouter recommends. Show up on the OpenRouter
+# dashboard and help distinguish this app's usage from anything else on
+# the same key.
+OPENROUTER_HTTP_REFERER = os.getenv("OPENROUTER_HTTP_REFERER", FRONTEND_URL)
+OPENROUTER_APP_TITLE = os.getenv("OPENROUTER_APP_TITLE", "Template Django React")
+
+# Model IDs referred to as "default" / "heavy" throughout the codebase.
+# Swap the model with an env var, not a code change.
+OPENROUTER_DEFAULT_MODEL = os.getenv("OPENROUTER_DEFAULT_MODEL", "anthropic/claude-haiku-4.5")
+OPENROUTER_HEAVY_MODEL = os.getenv("OPENROUTER_HEAVY_MODEL", "anthropic/claude-sonnet-4.5")
+
+# Monthly USD cost cap across all AgentRuns. Set to 0 to disable.
+OPENROUTER_MONTHLY_USD_CAP = float(os.getenv("OPENROUTER_MONTHLY_USD_CAP", "0"))
+
+# Max tool-use turns inside a single LLM tool loop before we force a
+# final no-tools turn (prevents runaway loops).
+LLM_MAX_TOOL_TURNS = int(os.getenv("LLM_MAX_TOOL_TURNS", "10"))
+
+
+# ---------------------------------------------------------------------------
+# MCP server
+# ---------------------------------------------------------------------------
+
+# Kill switch. When False, `/api/mcp/` returns 503 without touching the
+# tool registry. Useful for one-click disable during an incident.
+MCP_ENABLED = os.getenv("MCP_ENABLED", "true").lower() == "true"
