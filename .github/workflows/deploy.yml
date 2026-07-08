@@ -11,7 +11,7 @@ jobs:
         run: sudo chown -R $USER:$USER ${{ github.workspace }} || true
 
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       # THIS STEP MUST BE FIRST — nothing depends on the tree except this,
       # and the .env files are prerequisites for both builds and the compose stack.
