@@ -1,0 +1,87 @@
+name: Deploy to Pi 5
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: self-hosted
+    steps:
+      - name: Fix permissions from prior Docker run
+        run: sudo chown -R $USER:$USER ${{ github.workspace }} || true
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # THIS STEP MUST BE FIRST — nothing depends on the tree except this,
+      # and the .env files are prerequisites for both builds and the compose stack.
+      - name: Create .env files from Secrets
+        run: |
+          # Quotes preserve multi-line formatting from your GitHub secrets.
+          echo "${{ secrets.BACKEND_ENV }}" > backend/.env
+          echo "${{ secrets.FRONTEND_ENV }}" > frontend/.env
+
+      - name: Calculate Hashes
+        id: hashes
+        run: |
+          # Hash dependency manifests so we can skip rebuilds when nothing changed.
+          echo "backend_hash=$(cat backend/pyproject.toml backend/uv.lock backend/Dockerfile 2>/dev/null | sha256sum | awk '{print $1}')" >> $GITHUB_OUTPUT
+          echo "frontend_hash=$(cat frontend/package.json frontend/package-lock.json frontend/Dockerfile 2>/dev/null | sha256sum | awk '{print $1}')" >> $GITHUB_OUTPUT
+
+      - name: Build Frontend and Extract Assets
+        run: |
+          echo "Building frontend assets..."
+          docker build --target build --build-arg BUILDKIT_INLINE_CACHE=1 \
+            -t app-frontend-builder:${{ steps.hashes.outputs.frontend_hash }} \
+            ./frontend
+
+          # Extract dist to a temp folder, then atomic swap into the nginx mount
+          # to avoid 404s during extraction.
+          docker create --name temp-frontend app-frontend-builder:${{ steps.hashes.outputs.frontend_hash }}
+          docker cp temp-frontend:/app/dist ./frontend/dist_new
+          docker rm temp-frontend
+
+          rm -rf ./frontend/dist_old
+          mv ./frontend/dist ./frontend/dist_old 2>/dev/null || true
+          mv ./frontend/dist_new ./frontend/dist
+
+      - name: Deploy Backend and Nginx
+        env:
+          BACKEND_HASH: ${{ steps.hashes.outputs.backend_hash }}
+        run: |
+          export BACKEND_IMAGE_HASH=$BACKEND_HASH
+
+          if ! docker image inspect app-backend:${BACKEND_HASH} > /dev/null 2>&1; then
+            echo "Backend dependencies changed. Building new backend image..."
+            docker build -t app-backend:${BACKEND_HASH} ./backend
+
+            # Zero-downtime rolling restart.
+            docker compose up -d --force-recreate chroma db
+            docker compose up -d --scale backend=1 --no-recreate backend
+            docker compose up -d --scale backend=2 --no-recreate --wait backend
+            docker compose exec -T nginx nginx -s reload || true
+            docker compose up -d --scale backend=2 --wait backend
+            docker compose up -d --scale backend=1 backend
+
+            docker compose up -d --force-recreate --wait nginx
+          else
+            echo "Backend dependencies unchanged. Performing rapid code reload..."
+            docker compose up -d --force-recreate --wait backend
+            docker compose up -d --force-recreate --wait nginx
+          fi
+
+      - name: Cleanup old images
+        run: |
+          docker system prune -f
+          # Preserve the "keep-cache=true" labelled layers used by the deps stages.
+          docker image prune -a -f --filter "until=24h" --filter "label!=keep-cache=true"
+
+      - name: Seed Users
+        run: |
+          # Get the actual container name from docker-compose (project prefix varies).
+          CONTAINER=$(docker compose ps -q backend | head -n1)
+          if [ -z "$CONTAINER" ]; then
+            echo "ERROR: could not find backend container"; exit 1
+          fi
+          docker exec -w /app "$CONTAINER" python manage.py seed_users || \
+            (echo "ERROR: seed_users failed" && exit 1)

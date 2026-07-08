@@ -1,0 +1,1 @@
+web: uv run sh deploy.sh

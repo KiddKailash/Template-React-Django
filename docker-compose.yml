@@ -1,0 +1,74 @@
+services:
+  chroma:
+    image: chromadb/chroma:1.5.8
+    volumes:
+      - chroma_data:/data
+    restart: unless-stopped
+
+  db:
+    image: postgres:15-alpine
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB:-app}
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-app}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+
+  backend:
+    image: app-backend:${BACKEND_IMAGE_HASH:-latest}
+    build:
+      context: ./backend
+    depends_on:
+      db:
+        condition: service_healthy
+      chroma:
+        condition: service_started
+    env_file:
+      - ./backend/.env
+    environment:
+      # Override local .env settings for Docker networking
+      - DB_HOST=db
+      - DJANGO_SETTINGS_MODULE=config.settings
+      - DJANGO_DEBUG=false
+      - CHROMA_HOST=chroma
+      - CHROMA_PORT=8000
+    volumes:
+      - ./backend:/app
+      - media_data:/app/media
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/api/health/ || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    command:
+      - sh
+      - -c
+      - "python manage.py collectstatic --noinput && python manage.py migrate && exec gunicorn --bind 0.0.0.0:8000 --timeout 60 --graceful-timeout 300 --threads 4 --max-requests 200 --max-requests-jitter 20 config.wsgi:application"
+
+  nginx:
+    image: nginx:alpine
+    env_file:
+      - ./frontend/.env
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./frontend/dist:/usr/share/nginx/html:ro
+      - media_data:/app/media:ro
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  media_data:
+  chroma_data:

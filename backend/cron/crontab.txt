@@ -1,0 +1,15 @@
+# Cron schedule (template).
+# Install with: crontab /path/to/backend/cron/crontab.txt
+# Or to merge with existing: (crontab -l 2>/dev/null; cat backend/cron/crontab.txt) | crontab -
+#
+# Adjust the schedule + orchestrate.sh mode dispatch to your project.
+# Paths assume the compose stack lives at ~/projects/<project>/<project>.
+
+# Daily at 9:00 AM
+0 9 * * * cd /home/USER/projects/PROJECT/PROJECT && docker compose exec -T backend bash /app/cron/orchestrate.sh daily >> /home/USER/logs/cron.log 2>&1
+
+# Tue–Sat at 8:30 AM
+30 8 * * 2-6 cd /home/USER/projects/PROJECT/PROJECT && docker compose exec -T backend bash /app/cron/orchestrate.sh nightly >> /home/USER/logs/cron.log 2>&1
+
+# Sunday at 8:30 AM
+30 8 * * 0 cd /home/USER/projects/PROJECT/PROJECT && docker compose exec -T backend bash /app/cron/orchestrate.sh weekly >> /home/USER/logs/cron.log 2>&1

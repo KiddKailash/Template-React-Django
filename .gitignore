@@ -1,0 +1,38 @@
+# Ignore .env files in both frontend and backend
+**/.env
+backend/.env.production
+
+# Ignore common IDE and tool config folders
+.vscode/
+.claude/
+TODOS.md
+
+# Optionally ignore any .env at root, if used
+/.env
+
+.DS_Store
+
+# Local data dumps + chroma state
+dumps/
+.chroma/
+
+# Node
+node_modules/
+frontend/dist/
+frontend/dist_new/
+frontend/dist_old/
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.pyc
+.ruff_cache/
+.pytest_cache/
+.coverage
+staticfiles/
+backend/media/
+
+# Logs
+*.log
+logs/
