@@ -1,5 +1,5 @@
 # Stage 1: Dependencies
-FROM node:20-alpine AS deps
+FROM node:26-alpine AS deps
 LABEL keep-cache="true"
 RUN apk upgrade --no-cache
 WORKDIR /app
