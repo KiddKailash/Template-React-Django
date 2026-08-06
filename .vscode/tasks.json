@@ -4,7 +4,10 @@
       {
         "label": "Frontend: Run Server",
         "type": "shell",
-        "command": "cd frontend && npm run dev",
+        "command": "npm run dev",
+        "options": {
+          "cwd": "${workspaceFolder}/frontend"
+        },
         "presentation": {
           "echo": true,
           "reveal": "always",
@@ -19,10 +22,16 @@
         "type": "shell",
         "command": "uv run python manage.py runserver",
         "options": {
-          "cwd": "${workspaceFolder}/backend",
-          "env": {
-            "PATH": "${env:HOME}/.local/bin:${env:PATH}"
-          }
+          "cwd": "${workspaceFolder}/backend"
+        },
+        "windows": {
+          "options": { "env": { "PATH": "${userHome}\\.local\\bin;${env:PATH}" } }
+        },
+        "osx": {
+          "options": { "env": { "PATH": "${userHome}/.local/bin:${env:PATH}" } }
+        },
+        "linux": {
+          "options": { "env": { "PATH": "${userHome}/.local/bin:${env:PATH}" } }
         },
         "presentation": {
           "echo": true,
@@ -38,10 +47,16 @@
         "command": "uv run python manage.py makemigrations",
         "args": [],
         "options": {
-          "cwd": "${workspaceFolder}/backend",
-          "env": {
-            "PATH": "${env:HOME}/.local/bin:${env:PATH}"
-          }
+          "cwd": "${workspaceFolder}/backend"
+        },
+        "windows": {
+          "options": { "env": { "PATH": "${userHome}\\.local\\bin;${env:PATH}" } }
+        },
+        "osx": {
+          "options": { "env": { "PATH": "${userHome}/.local/bin:${env:PATH}" } }
+        },
+        "linux": {
+          "options": { "env": { "PATH": "${userHome}/.local/bin:${env:PATH}" } }
         },
         "presentation": {
           "echo": true,
@@ -56,10 +71,16 @@
         "command": "uv run python manage.py migrate",
         "args": [],
         "options": {
-          "cwd": "${workspaceFolder}/backend",
-          "env": {
-            "PATH": "${env:HOME}/.local/bin:${env:PATH}"
-          }
+          "cwd": "${workspaceFolder}/backend"
+        },
+        "windows": {
+          "options": { "env": { "PATH": "${userHome}\\.local\\bin;${env:PATH}" } }
+        },
+        "osx": {
+          "options": { "env": { "PATH": "${userHome}/.local/bin:${env:PATH}" } }
+        },
+        "linux": {
+          "options": { "env": { "PATH": "${userHome}/.local/bin:${env:PATH}" } }
         },
         "presentation": {
           "echo": true,

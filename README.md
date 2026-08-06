@@ -13,7 +13,8 @@ For the architectural overview, read [ARCHITECTURE.md](./ARCHITECTURE.md). For U
 ```bash
 git clone <this-template> my-new-project
 cd my-new-project
-rm -rf .git && git init
+rm -rf .git
+git init
 ```
 
 Then rename what needs to be renamed:
@@ -179,7 +180,8 @@ cd backend
 uv run python manage.py runserver
 uv run python manage.py migrate
 uv run pytest                      # tests
-uv run ruff check . && uv run ruff format .
+uv run ruff check .
+uv run ruff format .
 
 # Frontend
 cd frontend

@@ -10,7 +10,8 @@ cp .env.example .env
 uv run python manage.py migrate
 uv run python manage.py runserver
 uv run pytest
-uv run ruff check . && uv run ruff format .
+uv run ruff check .
+uv run ruff format .
 ```
 
 ## Endpoints (public)
