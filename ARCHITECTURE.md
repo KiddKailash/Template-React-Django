@@ -249,8 +249,8 @@ Two mechanisms, no queue:
 ### 3.6 Tests
 
 - `core/tests/` — pytest. `conftest.py` at the backend root provides shared fixtures (`user`, `authenticated_client`, factories).
-- Run: `cd backend && uv run pytest`.
-- Lint: `uv run ruff check . && uv run ruff format .`.
+- Run: from `backend/`, `uv run pytest`.
+- Lint: from `backend/`, `uv run ruff check .` then `uv run ruff format .`.
 
 ---
 
@@ -367,7 +367,7 @@ These come from `CLAUDE.md` and the codebase, and matter day-to-day:
 - **MUI imports are individual** (`@mui/material/Box`), never barrel.
 - **Theme tokens, not hex.** Use `theme.palette.background.default` etc.; both modes depend on it.
 - **Don't hand-edit migrations.** Run `makemigrations` + `migrate`.
-- **Tooling.** `uv run ruff check . && uv run ruff format .` in `backend/`; `npm run lint` in `frontend/`; `uv run pytest` for tests.
+- **Tooling.** In `backend/`: `uv run ruff check .` then `uv run ruff format .`; `npm run lint` in `frontend/`; `uv run pytest` for tests.
 - **`DESIGN.md` is law for UI decisions.** Read before changing anything visual.
 
 ---

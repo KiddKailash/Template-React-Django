@@ -50,14 +50,16 @@ Never hardcode colours (e.g. `#ffffff`), instead always use the theme object pro
 Never edit migration files by hand. Notify the user and they will run:
 
 ```bash
-uv run python manage.py makemigrations && uv run python manage.py migrate
+uv run python manage.py makemigrations
+uv run python manage.py migrate
 ```
 
 ### Code formatting
 
 - Ruff is used as a python linter for python files within the backend/ directory:
     ```bash
-    uv run ruff check . && uv run ruff format .
+    uv run ruff check .
+    uv run ruff format .
     ```
 
 - Npm run lint is used as a JavaScript/TypeScript linter within the frontend/ directory:
