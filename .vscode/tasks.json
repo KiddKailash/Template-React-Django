@@ -1,0 +1,105 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+      {
+        "label": "Frontend: Run Server",
+        "type": "shell",
+        "command": "cd frontend && npm run dev",
+        "presentation": {
+          "echo": true,
+          "reveal": "always",
+          "focus": false,
+          "panel": "shared"
+        },
+        "isBackground": true,
+        "problemMatcher": []
+      },
+      {
+        "label": "Backend: Run Server",
+        "type": "shell",
+        "command": "uv run python manage.py runserver",
+        "options": {
+          "cwd": "${workspaceFolder}/backend",
+          "env": {
+            "PATH": "${env:HOME}/.local/bin:${env:PATH}"
+          }
+        },
+        "presentation": {
+          "echo": true,
+          "reveal": "always",
+          "focus": false,
+          "panel": "shared"
+        },
+        "problemMatcher": []
+      },
+      {
+        "label": "Backend: Make Migrations",
+        "type": "shell",
+        "command": "uv run python manage.py makemigrations",
+        "args": [],
+        "options": {
+          "cwd": "${workspaceFolder}/backend",
+          "env": {
+            "PATH": "${env:HOME}/.local/bin:${env:PATH}"
+          }
+        },
+        "presentation": {
+          "echo": true,
+          "reveal": "always",
+          "focus": false,
+          "panel": "shared"
+        }
+      },
+      {
+        "label": "Backend: Migrate Database",
+        "type": "shell",
+        "command": "uv run python manage.py migrate",
+        "args": [],
+        "options": {
+          "cwd": "${workspaceFolder}/backend",
+          "env": {
+            "PATH": "${env:HOME}/.local/bin:${env:PATH}"
+          }
+        },
+        "presentation": {
+          "echo": true,
+          "reveal": "always",
+          "focus": false,
+          "panel": "shared"
+        }
+      },
+      {
+        "label": "Chroma: Run Server",
+        "type": "shell",
+        "command": "uv run run_chroma.py",
+        "isBackground": true,
+        "problemMatcher": {
+          "pattern": {
+            "regexp": "^$"
+          },
+          "background": {
+            "activeOnStart": true,
+            "beginsPattern": "Installed|Chroma",
+            "endsPattern": "Frontend server listening"
+          }
+        },
+        "presentation": {
+          "reveal": "silent",
+          "panel": "dedicated"
+        }
+      },
+      {
+        "label": "Run Frontend and Backend",
+        "dependsOn": [
+          "Chroma: Run Server",
+          "Backend: Run Server",
+          "Frontend: Run Server"
+        ],
+        "problemMatcher": [],
+        "runOptions": {
+          "runOn": "folderOpen"
+        }
+      }
+    ]
+  }
+  
