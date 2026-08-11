@@ -1,10 +1,10 @@
-# Template — Django + React Stack
+# Template
 
 This template is a Django backend + React frontend, made to run locally and deploy to a self-hosted Linux homeserver. Each branch is a complete, working project you can clone and build on directly.
 
 ---
 
-> **NOTE:** This `main` branch serves as the repository landing page and navigation guide. The actual starter templates live on dedicated branches — pick the one matching your OS and feature requirements below.
+> **NOTE:** This `main` branch serves as the repo landing page and navigation guide. The actual starter templates live on dedicated branches.
 
 ---
 
@@ -30,15 +30,13 @@ This template is a Django backend + React frontend, made to run locally and depl
 
 ## Choose Your Template Branch
 
-Templates are structured as `template/<os>/<variant>`. Select the branch tailored to your host OS and project scope:
+Templates are structured as `template/<variant>`. Select the branch tailored to your project scope:
 
 
-| Target OS         | Stack Variant        | Branch Name                                     | Direct Link                                                               |
-| ----------------- | -------------------- | ----------------------------------------------- | ------------------------------------------------------------------------- |
-| **macOS / Linux** | **Base Web App**     | `template/mac/react-django-web-app`             | [Browse Branch](../../tree/template/mac/react-django-web-app)             |
-| **macOS / Linux** | **Base + LLM + MCP** | `template/mac/react-django-llm-harness-mcp`     | [Browse Branch](../../tree/template/mac/react-django-llm-harness-mcp)     |
-| **Windows**       | **Base Web App**     | `template/windows/react-django-web-app`         | [Browse Branch](../../tree/template/windows/react-django-web-app)         |
-| **Windows**       | **Base + LLM + MCP** | `template/windows/react-django-llm-harness-mcp` | [Browse Branch](../../tree/template/windows/react-django-llm-harness-mcp) |
+| Stack Variant        | Branch Name                                 | Direct Link                                                       |
+| -------------------- | ------------------------------------------- | ----------------------------------------------------------------- |
+| **Base Web App**     | `template/mac/react-django-web-app`         | [Browse Branch](../../tree/template/react-django-web-app)         |
+| **Base + LLM + MCP** | `template/mac/react-django-llm-harness-mcp` | [Browse Branch](../../tree/template/react-django-llm-harness-mcp) |
 
 
 ## Feature Comparison
@@ -60,7 +58,7 @@ Templates are structured as `template/<os>/<variant>`. Select the branch tailore
 ```
 +------------------+     +------------------+     +------------------+
 |  1. Select       | --> |  2. Clone        | --> |  3. Configure    |
-|  OS & Variant    |     |  Target Branch   |     |  Follow README   |
+|  Variant         |     |  Target Branch   |     |  Follow README   |
 +------------------+     +------------------+     +------------------+
 ```
 
@@ -78,12 +76,8 @@ Templates are structured as `template/<os>/<variant>`. Select the branch tailore
 ```
 main (Landing Page & Documentation)
  |-- template/
-      |-- mac/
-      |    |-- react-django-web-app            # Base macOS/Linux stack
-      |    |-- react-django-llm-harness-mcp    # AI-extended macOS/Linux stack
-      |-- windows/
-           |-- react-django-web-app            # Base Windows stack
-           |-- react-django-llm-harness-mcp    # AI-extended Windows stack
+      |-- react-django-web-app            # Base web app stack
+      |-- react-django-llm-harness-mcp    # AI-extended web app stack
 ```
 
 > **TIP:** Treat these template branches as long-lived upstream sources. Pull from them whenever starting a new project.
