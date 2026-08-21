@@ -86,8 +86,16 @@ jobs:
         id: hashes
         run: |
           # Hash dependency manifests so we can skip rebuilds when nothing changed.
-          echo "backend_hash=$(cat backend/pyproject.toml backend/uv.lock backend/Dockerfile 2>/dev/null | sha256sum | awk '{print $1}')" >> $GITHUB_OUTPUT
+          BACKEND_HASH=$(cat backend/pyproject.toml backend/uv.lock backend/Dockerfile 2>/dev/null | sha256sum | awk '{print $1}')
+          echo "backend_hash=$BACKEND_HASH" >> $GITHUB_OUTPUT
           echo "frontend_hash=$(cat frontend/package.json frontend/package-lock.json frontend/Dockerfile 2>/dev/null | sha256sum | awk '{print $1}')" >> $GITHUB_OUTPUT
+          # Make the resolved tag visible to every LATER step. Shell exports do
+          # not survive across GitHub Actions steps, and docker-compose.yml now
+          # requires BACKEND_IMAGE_HASH with no fallback (R3) -- so any later
+          # `docker compose` call, `ps` included, dies on interpolation without
+          # this. The root .env is rebuilt from scratch each run, so this cannot
+          # go stale. It also makes the checkout on disk operable by hand.
+          printf 'BACKEND_IMAGE_HASH=%s\n' "$BACKEND_HASH" >> .env
 
       - name: Build Frontend and Extract Assets
         run: |
