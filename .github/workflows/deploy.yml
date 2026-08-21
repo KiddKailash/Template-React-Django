@@ -189,9 +189,19 @@ jobs:
           docker compose up -d --no-recreate --scale backend=2 --wait backend
           reload_nginx
 
-          # Replica 1 still runs the old image; compose recreates just that one
-          # (replica 2 already matches). Replica 2 serves throughout.
-          docker compose up -d --scale backend=2 --wait backend
+          # Replace replica 1 by REMOVING it, not by asking compose to recreate it.
+          # When the image tag is unchanged -- the common case, since the tag is
+          # a hash of the dependency manifests -- compose considers replica 1
+          # up to date and leaves it alone. The deploy would then create a fresh
+          # replica 2, throw it away at the scale-down, and keep the STALE one.
+          # Backend code is bind-mounted, so new code would never reach gunicorn
+          # and the deploy would go green having changed nothing.
+          OLD_REPLICA=$(docker compose ps --format '{{.Name}}' backend | sort -t- -k3 -n | head -n1)
+          echo "Retiring $OLD_REPLICA (replica 2 serves throughout)"
+          docker stop -t 15 "$OLD_REPLICA"
+          reload_nginx
+          docker rm "$OLD_REPLICA"
+          docker compose up -d --scale backend=2 --wait backend   # compose refills the gap, fresh
           reload_nginx
 
           docker compose up -d --scale backend=1 backend
