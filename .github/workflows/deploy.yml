@@ -80,7 +80,11 @@ jobs:
           chmod 600 .env
           grep -q '^NGINX_HOST_PORT=' .env || {
             echo "::error::NGINX_HOST_PORT unset after layering .env"; exit 1; }
-          echo "Resolved NGINX_HOST_PORT=$(grep '^NGINX_HOST_PORT=' .env | tail -1 | cut -d= -f2)"
+          # Print the port ALONE, not as NGINX_HOST_PORT=<n>. Where that exact
+          # line also lives inside a secret, Actions masks the whole string and
+          # the confirmation reads "Resolved ***" -- useless as a pre-flight
+          # check. The bare number is not a registered secret value.
+          echo "Resolved host port -> $(grep '^NGINX_HOST_PORT=' .env | tail -1 | cut -d= -f2)"
 
       - name: Calculate Hashes
         id: hashes
