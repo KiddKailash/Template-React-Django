@@ -15,6 +15,11 @@ Replace `<PROJECT>`, `<USER>`, and `<DOMAIN>` with your specifics before treatin
 ## One-time host setup
 
 ```bash
+# Deploy-time dependency: the workflow rsyncs frontend/dist in place so the
+# nginx bind mount never goes stale (an mv would replace the directory inode
+# and nginx would keep serving the old build).
+sudo apt-get install -y rsync
+
 # Docker
 curl -fsSL https://get.docker.com | sh
 sudo usermod -aG docker $USER
