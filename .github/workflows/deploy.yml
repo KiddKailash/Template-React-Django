@@ -130,8 +130,15 @@ jobs:
           # --delete-after transfers everything new BEFORE removing anything
           # stale, so with content-hashed asset filenames a client mid-load
           # always finds the file it asked for.
+          # frontend/dist/.gitkeep is COMMITTED (force-added past .gitignore) and
+          # must stay. `actions/checkout` runs `git clean -ffdx`, which deletes
+          # frontend/dist/ outright -- and a Docker bind mount follows the inode
+          # it was created with, so nginx would then be mounted to a deleted
+          # directory and serve 403/500 for everything. A tracked file inside
+          # the directory makes git clean empty it instead of removing it, so
+          # the inode survives and the mount stays live.
           mkdir -p ./frontend/dist
-          rsync -a --delete-after ./frontend/dist_new/ ./frontend/dist/
+          rsync -a --delete-after --exclude=.gitkeep ./frontend/dist_new/ ./frontend/dist/
           rm -rf ./frontend/dist_new
 
       - name: Deploy (rolling, zero-downtime)
@@ -196,6 +203,17 @@ jobs:
           # ~1.9s -- measured, and it was the only reason the old sequence
           # needed to.
           docker compose up -d --wait nginx
+
+          # Safety net. If the bind mount is ever stale -- .gitkeep lost, a
+          # fresh clone, someone rm -rf'ing dist -- nginx serves an empty root
+          # and EVERY request 403/500s while the container still looks healthy.
+          # Detect that and repair it, rather than completing a green deploy on
+          # a dead site. The repair costs ~2s of static-asset downtime, which
+          # is the old behaviour and vastly better than shipping broken.
+          if ! docker compose exec -T nginx test -f /usr/share/nginx/html/index.html 2>/dev/null; then
+            echo "::warning::nginx bind mount is stale - recreating to re-establish it"
+            docker compose up -d --force-recreate --wait nginx
+          fi
 
       - name: Cleanup old images
         run: |

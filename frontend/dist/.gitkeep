@@ -1,0 +1,12 @@
+This file is intentionally committed, past .gitignore.
+
+actions/checkout runs 'git clean -ffdx', which would otherwise delete
+frontend/dist/ outright on every deploy. A Docker bind mount follows the
+inode it was created with, so nginx would then be mounted to a deleted
+directory and serve 403/500 for every request while still looking healthy.
+
+A tracked file inside the directory makes git clean EMPTY it rather than
+REMOVE it, so the inode survives and the mount stays live -- which is what
+lets deploy.yml rsync the new build in place without recreating nginx.
+
+deploy.yml rsyncs with --exclude=.gitkeep so this file is never deleted.
