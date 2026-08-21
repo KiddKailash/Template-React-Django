@@ -13,13 +13,74 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # THIS STEP MUST BE FIRST — nothing depends on the tree except this,
-      # and the .env files are prerequisites for both builds and the compose stack.
-      - name: Create .env files from Secrets
+      # ── PREFLIGHT ──────────────────────────────────────────────────────
+      # A template ships defaults, and defaults get copied verbatim: this repo's
+      # descendant Store-Arbitrage still published an image called "app-backend"
+      # months after it stopped being a generic app. Fail the FIRST deploy until
+      # the placeholders are replaced, rather than deploying something generic.
+      - name: Preflight - placeholders replaced?
         run: |
-          # Quotes preserve multi-line formatting from your GitHub secrets.
-          echo "${{ secrets.BACKEND_ENV }}" > backend/.env
-          echo "${{ secrets.FRONTEND_ENV }}" > frontend/.env
+          set -euo pipefail
+          fail=0
+          if grep -q '^name: changeme' docker-compose.yml; then
+            echo "::error::docker-compose.yml still says 'name: changeme'."
+            echo "Set it to your project name (lowercase, hyphens). It prefixes"
+            echo "every container and named volume - choose it once, carefully."
+            fail=1
+          fi
+          if grep -q 'image: changeme-backend' docker-compose.yml; then
+            echo "::error::docker-compose.yml still uses the 'changeme-backend' image name."
+            fail=1
+          fi
+          if grep -q 'PROJECT: changeme' .github/workflows/deploy.yml; then
+            echo "::error::deploy.yml still has PROJECT: changeme."
+            echo "It must match 'name:' in docker-compose.yml."
+            fail=1
+          fi
+          [ "$fail" -eq 0 ] || exit 1
+          echo "Placeholders replaced."
+
+      # ── STANDARD ENV STEP ──────────────────────────────────────────────
+      # Compose interpolates ${VAR} in docker-compose.yml from the project-root
+      # .env ONLY — never from an env_file:. So the root .env is layered:
+      #   1. backend/.env           app config + credentials (secret)
+      #   2. secrets.ROOT_ENV       compose-only vars absent from backend/.env
+      #                             (POSTGRES_* — the backend uses DB_* names)
+      #   3. ~/deploy/<project>.env  host-owned facts (NGINX_HOST_PORT), named
+      #                              after PROJECT below
+      # Duplicate keys resolve LAST-WINS, so the host file always beats a stale
+      # value left inside a secret. Verified 2026-08-21.
+      - name: Materialize env files
+        env:
+          PROJECT: changeme                 # MUST match `name:` in docker-compose.yml
+          BACKEND_ENV: ${{ secrets.BACKEND_ENV }}
+          FRONTEND_ENV: ${{ secrets.FRONTEND_ENV }}
+          ROOT_ENV: ${{ secrets.ROOT_ENV }}
+        run: |
+          set -euo pipefail
+          mkdir -p backend frontend
+          printf '%s\n' "$BACKEND_ENV" > backend/.env
+          chmod 600 backend/.env
+          if [ -n "${FRONTEND_ENV:-}" ]; then
+            printf '%s\n' "$FRONTEND_ENV" > frontend/.env
+            chmod 600 frontend/.env
+          fi
+          # .env may be a symlink left by an earlier revision of this workflow;
+          # remove it first so we never write through it into backend/.env.
+          rm -f .env
+          cat backend/.env > .env
+          [ -n "${ROOT_ENV:-}" ] && printf '%s\n' "$ROOT_ENV" >> .env
+          HOST_ENV="$HOME/deploy/${PROJECT}.env"
+          if [ ! -r "$HOST_ENV" ]; then
+            echo "::error::missing $HOST_ENV on the runner host - it supplies"
+            echo "NGINX_HOST_PORT. See ~/deploy/README.md and the port table in ~/CLAUDE.md."
+            exit 1
+          fi
+          cat "$HOST_ENV" >> .env
+          chmod 600 .env
+          grep -q '^NGINX_HOST_PORT=' .env || {
+            echo "::error::NGINX_HOST_PORT unset after layering .env"; exit 1; }
+          echo "Resolved NGINX_HOST_PORT=$(grep '^NGINX_HOST_PORT=' .env | tail -1 | cut -d= -f2)"
 
       - name: Calculate Hashes
         id: hashes
@@ -32,12 +93,12 @@ jobs:
         run: |
           echo "Building frontend assets..."
           docker build --target build --build-arg BUILDKIT_INLINE_CACHE=1 \
-            -t app-frontend-builder:${{ steps.hashes.outputs.frontend_hash }} \
+            -t changeme-frontend-builder:${{ steps.hashes.outputs.frontend_hash }} \
             ./frontend
 
           # Extract dist to a temp folder, then atomic swap into the nginx mount
           # to avoid 404s during extraction.
-          docker create --name temp-frontend app-frontend-builder:${{ steps.hashes.outputs.frontend_hash }}
+          docker create --name temp-frontend changeme-frontend-builder:${{ steps.hashes.outputs.frontend_hash }}
           docker cp temp-frontend:/app/dist ./frontend/dist_new
           docker rm temp-frontend
 
@@ -51,9 +112,9 @@ jobs:
         run: |
           export BACKEND_IMAGE_HASH=$BACKEND_HASH
 
-          if ! docker image inspect app-backend:${BACKEND_HASH} > /dev/null 2>&1; then
+          if ! docker image inspect changeme-backend:${BACKEND_HASH} > /dev/null 2>&1; then
             echo "Backend dependencies changed. Building new backend image..."
-            docker build -t app-backend:${BACKEND_HASH} ./backend
+            docker build -t changeme-backend:${BACKEND_HASH} ./backend
 
             # Zero-downtime rolling restart.
             docker compose up -d --force-recreate chroma db
