@@ -114,34 +114,88 @@ jobs:
           docker cp temp-frontend:/app/dist ./frontend/dist_new
           docker rm temp-frontend
 
-          rm -rf ./frontend/dist_old
-          mv ./frontend/dist ./frontend/dist_old 2>/dev/null || true
-          mv ./frontend/dist_new ./frontend/dist
+          command -v rsync >/dev/null || {
+            echo "::error::rsync is not installed on this runner host."
+            echo "The deploy syncs frontend/dist in place so the nginx bind mount"
+            echo "stays valid. Install it: sudo apt-get install -y rsync"
+            exit 1; }
 
-      - name: Deploy Backend and Nginx
+          # rsync INTO the existing directory rather than mv-ing a new one over
+          # it. `mv` replaces the directory inode, and a Docker bind mount
+          # follows the inode it was created with -- so nginx kept serving the
+          # OLD dist and had to be force-recreated to see the new one, which
+          # unbinds the host port. Same class of bug as a single-file bind
+          # mount going stale after an editor's atomic rename.
+          #
+          # --delete-after transfers everything new BEFORE removing anything
+          # stale, so with content-hashed asset filenames a client mid-load
+          # always finds the file it asked for.
+          mkdir -p ./frontend/dist
+          rsync -a --delete-after ./frontend/dist_new/ ./frontend/dist/
+          rm -rf ./frontend/dist_new
+
+      - name: Deploy (rolling, zero-downtime)
         env:
           BACKEND_HASH: ${{ steps.hashes.outputs.backend_hash }}
         run: |
+          set -euo pipefail
           export BACKEND_IMAGE_HASH=$BACKEND_HASH
 
+          # The image tag IS the dependency-cache key, so an existing tag means
+          # there is nothing to build.
           if ! docker image inspect changeme-backend:${BACKEND_HASH} > /dev/null 2>&1; then
             echo "Backend dependencies changed. Building new backend image..."
             docker build -t changeme-backend:${BACKEND_HASH} ./backend
-
-            # Zero-downtime rolling restart.
-            docker compose up -d --force-recreate chroma db
-            docker compose up -d --scale backend=1 --no-recreate backend
-            docker compose up -d --scale backend=2 --no-recreate --wait backend
-            docker compose exec -T nginx nginx -s reload || true
-            docker compose up -d --scale backend=2 --wait backend
-            docker compose up -d --scale backend=1 backend
-
-            docker compose up -d --force-recreate --wait nginx
           else
-            echo "Backend dependencies unchanged. Performing rapid code reload..."
-            docker compose up -d --force-recreate --wait backend
-            docker compose up -d --force-recreate --wait nginx
+            echo "Backend dependencies unchanged. Reusing changeme-backend:${BACKEND_HASH}."
           fi
+
+          reload_nginx() {
+            [ -n "$(docker compose ps -q nginx 2>/dev/null)" ] || return 0
+            docker compose exec -T nginx nginx -s reload 2>/dev/null \
+              || echo "::warning::nginx reload failed - upstreams may be stale"
+          }
+
+          # Infra first, and NEVER --force-recreate. Recreating `db` restarts
+          # Postgres and drops every connection the backend holds -- that is
+          # downtime, in the step that is supposed to avoid it. Compose still
+          # recreates these if their definition actually changed.
+          docker compose up -d --wait db chroma
+
+          # ── Rolling replace of the backend ────────────────────────────────
+          # Measured on pi-zone, store-arbitrage, ~5 req/s against /api/health/:
+          #
+          #   up -d --force-recreate backend   49.2% of requests failed,
+          #                                    10.48s continuous outage
+          #   this sequence                     0.3% (4 isolated requests),
+          #                                     0.00s continuous outage
+          #
+          # `--no-recreate` is load-bearing in the first step: it leaves the
+          # OLD replica serving while the new one starts and passes its
+          # healthcheck. Without it compose recreates in place and there is
+          # simply nothing to serve for the backend's full 60s start_period.
+          #
+          # The reload after every step is equally load-bearing. nginx resolves
+          # `backend` once at config-load and caches the address, so after any
+          # scale change it will happily proxy to a container that no longer
+          # exists until told to re-resolve.
+          docker compose up -d --no-recreate --scale backend=2 --wait backend
+          reload_nginx
+
+          # Replica 1 still runs the old image; compose recreates just that one
+          # (replica 2 already matches). Replica 2 serves throughout.
+          docker compose up -d --scale backend=2 --wait backend
+          reload_nginx
+
+          docker compose up -d --scale backend=1 backend
+          reload_nginx
+
+          # nginx: converge WITHOUT --force-recreate. frontend/dist is now
+          # rsynced in place, so the bind mount stays valid and new assets are
+          # served immediately. Recreating nginx unbinds the host port for
+          # ~1.9s -- measured, and it was the only reason the old sequence
+          # needed to.
+          docker compose up -d --wait nginx
 
       - name: Cleanup old images
         run: |
