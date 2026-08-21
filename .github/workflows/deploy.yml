@@ -163,6 +163,18 @@ jobs:
               || echo "::warning::nginx reload failed - upstreams may be stale"
           }
 
+          # Record which backend container is serving now, so we can PROVE at the
+          # end that it was actually replaced. Backend code is bind-mounted, so
+          # a deploy that leaves the old container running updates the files on
+          # disk and changes nothing that is executing -- and it goes green.
+          # That has happened; do not rely on noticing it by eye.
+          BEFORE_ID=$(docker compose ps -q backend 2>/dev/null | head -n1 || true)
+          if [ -n "${BEFORE_ID:-}" ]; then
+            BEFORE_STARTED=$(docker inspect -f '{{.State.StartedAt}}' "$BEFORE_ID")
+          else
+            BEFORE_STARTED=none
+          fi
+
           # Infra first, and NEVER --force-recreate. Recreating `db` restarts
           # Postgres and drops every connection the backend holds -- that is
           # downtime, in the step that is supposed to avoid it. Compose still
@@ -206,6 +218,21 @@ jobs:
 
           docker compose up -d --scale backend=1 backend
           reload_nginx
+
+          # ── Assert the backend really was replaced ────────────────────────
+          # The image tag is a hash of the dependency manifests, so it is
+          # unchanged on most deploys and compose will happily decide there is
+          # nothing to do. If the serving container did not restart, the new
+          # code is NOT live -- fail loudly rather than report success.
+          AFTER_ID=$(docker compose ps -q backend | head -n1)
+          AFTER_STARTED=$(docker inspect -f '{{.State.StartedAt}}' "$AFTER_ID")
+          if [ "$BEFORE_STARTED" = "$AFTER_STARTED" ]; then
+            echo "::error::backend container was NOT replaced (still started $AFTER_STARTED)."
+            echo "Backend code is bind-mounted, so the running gunicorn is still"
+            echo "executing the PREVIOUS code. This deploy did not take effect."
+            exit 1
+          fi
+          echo "Backend replaced: $BEFORE_STARTED -> $AFTER_STARTED"
 
           # nginx: converge WITHOUT --force-recreate. frontend/dist is now
           # rsynced in place, so the bind mount stays valid and new assets are
