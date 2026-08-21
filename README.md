@@ -17,13 +17,32 @@ rm -rf .git
 git init
 ```
 
-Then rename what needs to be renamed:
+Then rename what needs to be renamed.
+
+**Do these three first — the deploy workflow refuses to run until they are
+done.** They all encode the same project name, so pick it once: lowercase,
+hyphens, no spaces.
+
+| File | Change |
+|------|--------|
+| `docker-compose.yml` | `name: changeme` → `name: my-new-project` |
+| `docker-compose.yml` | `image: changeme-backend:` → `image: my-new-project-backend:` |
+| `.github/workflows/deploy.yml` | `PROJECT: changeme` → `PROJECT: my-new-project` |
+
+The project name prefixes every container and every named volume, so it is
+effectively permanent: changing it later orphans the volumes and the app comes
+back up with an empty database. That is why it is a placeholder that fails the
+build rather than a default that quietly works — a working default gets copied
+verbatim, which is how a previous project spent months publishing an image
+literally called `app-backend`.
+
+Also worth renaming, but nothing enforces these:
 
 - `backend/pyproject.toml` — `name`, `description`
 - `frontend/package.json` — `name`
 - `frontend/index.html` — `<title>`
 - `frontend/vite.config.js` — PWA manifest name / short_name / description / theme_color
-- `docker-compose.yml` — env defaults (`POSTGRES_DB` etc.) if you want a per-project DB name
+- `.env.example` / `docker-compose.yml` — `POSTGRES_DB` etc. for a per-project DB name
 - `Makefile` — `SSH_HOST`, `COMPOSE_PROJECT`, `PGDATABASE`
 - `nginx/README.md` — hostname, tunnel ID, paths on the Pi
 
@@ -133,14 +152,31 @@ VITE_BACKEND_URL=http://localhost:8000
 ## Running the full stack via Docker
 
 ```bash
-# Ensure backend/.env and frontend/.env exist first.
-docker compose up --build
+cp .env.example .env      # what Compose interpolates — see the note below
+docker compose up --build # backend/.env and frontend/.env must exist too
 ```
 
-- SPA + API: <http://localhost/>
-- Django admin: <http://localhost/admin/>
+- SPA + API: <http://localhost:8080/> (whatever `NGINX_HOST_PORT` you set)
+- Django admin: <http://localhost:8080/admin/>
 - Postgres: internal (`db:5432`)
 - Chroma: internal (`chroma:8000`) — remove the service if not needed
+
+**Three env files, three different jobs.** This trips people up, so:
+
+| File | Read by | Contains |
+|------|---------|----------|
+| `backend/.env` | Django, via `env_file:` | app config, DB credentials, API keys |
+| `frontend/.env` | Vite at build time | `VITE_*` vars baked into the bundle |
+| `.env` (root) | **Compose itself** | only what appears as `${VAR}` in `docker-compose.yml` |
+
+Compose interpolates `${VAR}` in `docker-compose.yml` from the **root `.env`
+only** — never from an `env_file:` directive. So `NGINX_HOST_PORT` and
+`BACKEND_IMAGE_HASH` must be in the root `.env`, even though they look like they
+belong with everything else. `.env.example` documents both.
+
+Both are declared `${VAR:?message}` rather than `${VAR:-default}`. A missing
+value aborts with a message naming the fix, instead of silently binding a port
+that belongs to something else or pulling an image tag that was never built.
 
 ---
 
@@ -151,9 +187,25 @@ The full runbook (OS flash → Docker → self-hosted runner → env secrets →
 TL;DR:
 
 1. Install Docker + a self-hosted GitHub Actions runner on the Pi.
-2. Add `BACKEND_ENV` and `FRONTEND_ENV` as repository secrets (multi-line env content).
-3. Push to `main` → the workflow builds, deploys, and seeds users.
-4. Point a Cloudflare Tunnel at `http://localhost:80` on the Pi.
+2. Replace the three `changeme` placeholders (see *Cloning the template* above).
+3. Add `BACKEND_ENV` and `FRONTEND_ENV` as repository secrets (multi-line env content).
+4. **On the Pi**, allocate a host port and record it:
+
+   ```bash
+   mkdir -p ~/deploy
+   echo 'NGINX_HOST_PORT=8092' > ~/deploy/my-new-project.env   # filename == PROJECT
+   ```
+
+   The file is named after the compose project name, and the workflow fails with
+   a pointer if it is missing. The port lives on the host rather than in a
+   GitHub secret because **a host port is a property of the host, not of the
+   repository**: the repo declares that it needs a port, the host decides which,
+   and neither guesses on the other's behalf. A secret is invisible from the box,
+   cannot be checked against what is already bound, and ties the repo to one
+   machine.
+
+5. Push to `main` → the workflow builds, deploys, and seeds users.
+6. Point a Cloudflare Tunnel at `http://localhost:<NGINX_HOST_PORT>` on the Pi.
 
 ---
 
