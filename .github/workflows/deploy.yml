@@ -10,8 +10,30 @@ jobs:
       - name: Fix permissions from prior Docker run
         run: sudo chown -R $USER:$USER ${{ github.workspace }} || true
 
+      # actions/checkout runs `git clean -ffdx`, which EMPTIES frontend/dist
+      # (the committed .gitkeep preserves only the directory inode, keeping the
+      # nginx bind mount alive). Without a stash the site serves an empty root
+      # -- 403/404 on everything -- from checkout until the frontend build's
+      # rsync lands: ~55s whenever the build actually runs. So: stash the
+      # currently-served build aside, check out, and restore it immediately,
+      # so the OLD assets keep serving while the NEW ones build.
+      - name: Stash live frontend build
+        run: |
+          rm -rf "$RUNNER_TEMP/dist_keep"
+          if [ -d frontend/dist ]; then cp -a frontend/dist "$RUNNER_TEMP/dist_keep"; fi
+
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Restore live frontend build
+        run: |
+          if [ -d "$RUNNER_TEMP/dist_keep" ]; then
+            mkdir -p frontend/dist
+            # rsync INTO the directory, never replace it: the bind mount follows
+            # the inode it was created with (see the dist_new rsync below).
+            rsync -a --exclude=.gitkeep "$RUNNER_TEMP/dist_keep/" frontend/dist/
+            rm -rf "$RUNNER_TEMP/dist_keep"
+          fi
 
       # ── PREFLIGHT ──────────────────────────────────────────────────────
       # A template ships defaults, and defaults get copied verbatim: this repo's
@@ -198,26 +220,58 @@ jobs:
           # `backend` once at config-load and caches the address, so after any
           # scale change it will happily proxy to a container that no longer
           # exists until told to re-resolve.
-          docker compose up -d --no-recreate --scale backend=2 --wait backend
-          reload_nginx
+          # Roll by CONTAINER ID, never by parsing the -N name suffix: the
+          # suffix is not extractable generically (dashes in the project name
+          # shift the sort field), and compose numbers new replicas max+1
+          # without ever refilling gaps, so the number says nothing about age.
+          if [ -z "${BEFORE_ID:-}" ]; then
+            # Cold start - nothing is serving, so there is nothing to roll.
+            docker compose up -d --wait backend
+            reload_nginx
+          else
+            # Temp replica (numbered max+1) starts and passes its healthcheck
+            # while the old one keeps serving.
+            docker compose up -d --no-recreate --scale backend=2 --wait backend
+            reload_nginx
+            NEW_ID=$(docker compose ps -q backend | grep -v "^${BEFORE_ID}" | head -n1)
+            if [ -z "$NEW_ID" ]; then
+              echo "::error::rolling scale-up produced no second replica; aborting"
+              echo "with the old replica still serving."
+              exit 1
+            fi
 
-          # Replace replica 1 by REMOVING it, not by asking compose to recreate it.
-          # When the image tag is unchanged -- the common case, since the tag is
-          # a hash of the dependency manifests -- compose considers replica 1
-          # up to date and leaves it alone. The deploy would then create a fresh
-          # replica 2, throw it away at the scale-down, and keep the STALE one.
-          # Backend code is bind-mounted, so new code would never reach gunicorn
-          # and the deploy would go green having changed nothing.
-          OLD_REPLICA=$(docker compose ps --format '{{.Name}}' backend | sort -t- -k3 -n | head -n1)
-          echo "Retiring $OLD_REPLICA (replica 2 serves throughout)"
-          docker stop -t 15 "$OLD_REPLICA"
-          reload_nginx
-          docker rm "$OLD_REPLICA"
-          docker compose up -d --scale backend=2 --wait backend   # compose refills the gap, fresh
-          reload_nginx
+            docker stop -t 15 "$BEFORE_ID"
+            reload_nginx
 
-          docker compose up -d --scale backend=1 backend
-          reload_nginx
+            # Restart-in-place vs replace, decided by compose's own config-hash
+            # label. The hash covers the fully resolved service config INCLUDING
+            # env_file contents (verified on compose v5.1.3), so if the old
+            # replica's hash equals the temp replica's -- created seconds ago
+            # from the current definition -- a recreate would change nothing.
+            # Code is bind-mounted, so a plain restart boots gunicorn on the new
+            # code, and the container keeps its name: the -N suffix stays put
+            # instead of climbing by one every deploy. Unequal hashes (new
+            # image, changed env, compose edit) force a real replacement; the
+            # suffix then climbs by one, which is unavoidable and harmless --
+            # nothing on the host may key on the number.
+            LBL='com.docker.compose.config-hash'
+            OLD_HASH=$(docker inspect -f "{{index .Config.Labels \"$LBL\"}}" "$BEFORE_ID")
+            NEW_HASH=$(docker inspect -f "{{index .Config.Labels \"$LBL\"}}" "$NEW_ID")
+            if [ -n "$OLD_HASH" ] && [ "$OLD_HASH" = "$NEW_HASH" ]; then
+              echo "Config unchanged - restarting old replica in place (name stays stable)"
+              docker compose up -d --no-recreate --scale backend=2 --wait backend
+            else
+              echo "Config changed - replacing old replica"
+              docker rm "$BEFORE_ID"
+            fi
+            reload_nginx
+
+            # Scale-down removes the HIGHEST-numbered replica (verified on
+            # compose v5.1.3) -- always the temp one -- so in the common case
+            # the survivor is the restarted original.
+            docker compose up -d --scale backend=1 backend
+            reload_nginx
+          fi
 
           # ── Assert the backend really was replaced ────────────────────────
           # The image tag is a hash of the dependency manifests, so it is
