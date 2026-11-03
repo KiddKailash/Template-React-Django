@@ -24,6 +24,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `MCP_ENABLED` kill switch returns 503 without touching the tool registry.
 - 59 backend tests covering models, protocol, rate limit, privacy walker, tool loop, cost cap, and registry validation.
 
+### Changed
+- Chroma is disabled by default and kept as infrastructure: the `chroma` service sits behind compose profile `chroma` (backend dependency `required: false`), the deploy starts it only when the profile is active, and the Makefile's chroma dump/restore is opt-in (`WITH_CHROMA=1`). Delete the `profiles:` line to enable. No backend code used it.
+
+### Fixed
+- nginx can no longer be OOM-killed by a large upload, a large response or slow downloads. Temp-file spooling and autotuned TCP buffers both count against its 64 MB `mem_limit`: responses are never spooled (`proxy_max_temp_file_size 0`), bodies are limited to 8m (was 50m), with a commented streaming-upload location for bigger files, and the service's `sysctls` cap socket buffers at 512 KB. Measured on pi-zone 2026-11-03.
+
 ## [0.1.0] — Initial template
 
 ### Added

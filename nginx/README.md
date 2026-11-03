@@ -50,12 +50,12 @@ Managed by `docker-compose.yml` in the repo root.
 - **nginx (frontend):** `${NGINX_HOST_PORT}` → serves the React SPA + proxies `/api/` and `/admin/` to backend. The port is required, not defaulted — see *Host port* below.
 - **backend (Django):** Gunicorn on port 8000. `uv` for deps.
 - **db (Postgres):** Service name `db`. Internal `db:5432`.
-- **chroma (optional):** Service name `chroma`. Internal `chroma:8000`. Remove if not using RAG.
+- **chroma (off by default):** Service name `chroma`, behind compose profile `chroma`. Internal `chroma:8000`. Delete the `profiles:` line in `docker-compose.yml` to enable.
 
 Persistent volumes:
 - `media_data` — user uploads (mounted read-only in nginx, read-write in backend)
 - `postgres_data` — database data on the NVMe SSD
-- `chroma_data` — vector store (`/data` inside the Chroma container)
+- `chroma_data` — vector store (`/data` inside the Chroma container), created only once Chroma is enabled
 
 ## Secret Management
 
@@ -146,7 +146,7 @@ sudo systemctl enable cloudflared
    - Hash dependency manifests
    - Build the frontend, atomically swap `dist/` into the nginx mount
    - Build the backend image (or hot-reload if deps unchanged)
-   - Rolling restart chroma → db → backend → nginx
+   - Rolling restart db (+ chroma if enabled) → backend → nginx
    - Run `seed_users` to bootstrap accounts
 5. Visit `https://<DOMAIN>`.
 

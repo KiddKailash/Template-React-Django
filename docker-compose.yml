@@ -10,7 +10,15 @@
 name: changeme
 
 services:
+  # Chroma (vector store for RAG) is OFF by default: the `chroma` profile below
+  # keeps it out of `docker compose up` and the deploy. To turn it on for a
+  # project, delete the `profiles:` line (a property of the repo, committed),
+  # then use it from the backend via settings.CHROMA_HOST / CHROMA_PORT.
+  # Everything else (volume, healthcheck, backend wiring, deploy step,
+  # Makefile WITH_CHROMA=1 data sync, run_chroma.py for local dev) is already
+  # in place and follows the switch.
   chroma:
+    profiles: ["chroma"]
     image: chromadb/chroma:1.5.8
     volumes:
       - chroma_data:/data
@@ -52,8 +60,10 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      # required: false -- waited on only while the chroma profile is active.
       chroma:
         condition: service_healthy
+        required: false
     env_file:
       - ./backend/.env
     environment:
@@ -79,7 +89,20 @@ services:
       - "python manage.py collectstatic --noinput && python manage.py migrate && exec gunicorn --bind 0.0.0.0:8000 --timeout 60 --graceful-timeout 300 --threads 4 --max-requests 200 --max-requests-jitter 20 config.wsgi:application"
 
   nginx:
+    # anon peak 5-6 MB in all three apps built from this template (R4).
+    mem_limit: 64m
     image: nginx:alpine
+    # Per-socket TCP buffer ceiling, 512 KB in each direction (kernel default
+    # max: 6 MB receive, 4 MB send). Socket buffers are charged to mem_limit,
+    # and autotuning grew them to ~6 MB per stalled download: 8 slow clients
+    # pinned 53 MB of 64 MB. With this, 64 stalled downloads use 50 MB.
+    # Every peer is on the host or the LAN (cloudflared, Caddy, the backend,
+    # LAN browsers; RTT under 5 ms), so 512 KB is far above the bandwidth-delay
+    # product: one download still ran at 1.2 GB/s. Namespaced per container.
+    # Measured 2026-11-03; the temp-file half is in nginx/default.conf.
+    sysctls:
+      net.ipv4.tcp_rmem: "4096 131072 524288"
+      net.ipv4.tcp_wmem: "4096 16384 524288"
     env_file:
       - ./frontend/.env
     ports:

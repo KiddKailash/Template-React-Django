@@ -201,7 +201,11 @@ jobs:
           # Postgres and drops every connection the backend holds -- that is
           # downtime, in the step that is supposed to avoid it. Compose still
           # recreates these if their definition actually changed.
-          docker compose up -d --wait db chroma
+          # Chroma only when its profile is active (see docker-compose.yml):
+          # naming a profiled service on the command line starts it regardless,
+          # so ask compose which services are enabled instead of hard-coding it.
+          INFRA="db $(docker compose config --services | grep -x chroma || true)"
+          docker compose up -d --wait $INFRA
 
           # ── Rolling replace of the backend ────────────────────────────────
           # Measured on pi-zone, store-arbitrage, ~5 req/s against /api/health/:

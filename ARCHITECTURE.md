@@ -29,15 +29,15 @@ This document is the canonical map of the template. For *what the project is and
         ▼                                   ▼
 ┌───────────────┐                    ┌──────────────┐
 │ PostgreSQL 15 │                    │ Chroma (HTTP)│
-│ all app state │                    │  (optional — │
-│               │                    │  remove if   │
-│               │                    │  not needed) │
+│ all app state │                    │ (off by      │
+│               │                    │  default:    │
+│               │                    │  profile)    │
 └───────────────┘                    └──────────────┘
 
 Scheduled jobs (host cron → orchestrate.sh → manage.py commands)
 ```
 
-The stack is intentionally simple: one Django app, one React app, one Postgres, one nginx, and optionally one Chroma — all orchestrated by a single `docker-compose.yml` that runs on a self-hosted Raspberry Pi 5 behind a Cloudflare Tunnel. There is **no Redis, no Celery, no message broker**. Async work uses Python `threading` inside the Gunicorn process plus host-level cron.
+The stack is intentionally simple: one Django app, one React app, one Postgres, one nginx, and one Chroma, disabled by default (compose profile `chroma`). All of it is orchestrated by a single `docker-compose.yml` that runs on a self-hosted Raspberry Pi 5 behind a Cloudflare Tunnel. There is **no Redis, no Celery, no message broker**. Async work uses Python `threading` inside the Gunicorn process plus host-level cron.
 
 ---
 
@@ -61,8 +61,8 @@ Template-Django-React/
 ├── .github/
 │   ├── workflows/deploy.yml  CI/CD (self-hosted runner)
 │   └── dependabot.yml
-├── docker-compose.yml        chroma (optional) + db + backend + nginx
-├── run_chroma.py             Local-dev Chroma runner (port 8001, optional)
+├── docker-compose.yml        db + backend + nginx (+ chroma, profile, off by default)
+├── run_chroma.py             Local-dev Chroma runner (port 8001, only if Chroma is enabled)
 ├── Makefile                  Data sync from Pi → local
 ├── README.md                 Setup, env vars, ops runbook
 ├── DESIGN.md                 UI / design system (authoritative)
@@ -321,7 +321,7 @@ npm run preview
 
 | Service | Image | Role |
 |---|---|---|
-| `chroma` | `chromadb/chroma:1.5.8` | Optional vector store HTTP server. Volume: `chroma_data`. Remove if not needed. |
+| `chroma` | `chromadb/chroma:1.5.8` | Vector store HTTP server, **off by default**: behind compose profile `chroma`, so `up` and the deploy skip it and the backend's dependency on it is `required: false`. Delete the `profiles:` line to enable. Volume: `chroma_data`. |
 | `db` | `postgres:15-alpine` | App database. Healthcheck: `pg_isready`. Volume: `postgres_data`. |
 | `backend` | Built from `backend/Dockerfile` | Django + Gunicorn. Runs `collectstatic` + `migrate` on startup. Volumes: `./backend`, `media_data`. |
 | `nginx` | `nginx:alpine` | Reverse proxy + SPA host. Mounts `nginx/default.conf`, `frontend/dist`, `media_data`. Only published port (`:80`). 50 MB body limit for uploads. |
@@ -345,7 +345,7 @@ Driven by host cron → `backend/cron/orchestrate.sh <mode>` → `manage.py` com
 3. Hash dependency manifests (`Dockerfile`, `pyproject.toml`, `uv.lock`, `package*.json`).
 4. Build the frontend in a throw-away Docker image, extract `dist/`, atomic swap into nginx mount.
 5. Rebuild the backend image **only if** dependency hashes changed; otherwise hot-reload code.
-6. Rolling restart: chroma → db → backend (scale to 2, then back to 1) → nginx reload.
+6. Rolling restart: db (+ chroma if its profile is enabled) → backend (scale to 2, then back to 1) → nginx reload.
 7. Prune dangling images, remove anything >24h old.
 8. `seed_users` to bootstrap accounts on first boot.
 

@@ -221,7 +221,8 @@ HEALTHCHECK_URL = os.getenv("HEALTHCHECK_URL", "")
 # Frontend base URL for deep links in emails
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
 
-# Optional Chroma (RAG) — remove if unused
+# Chroma (RAG) — off by default; the service sits behind the `chroma` compose
+# profile. Unused until a project enables it (README "Chroma for RAG").
 CHROMA_HOST = os.getenv("CHROMA_HOST", "localhost")
 CHROMA_PORT = int(os.getenv("CHROMA_PORT", "8001"))
 
