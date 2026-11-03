@@ -13,6 +13,7 @@ import PrivateRoute from './components/PrivateRoute';
 import Home from './pages/Home';
 import AuthPage from './pages/AuthPage';
 import Settings from './pages/Settings';
+import { featurePages } from './featurePages';
 import Error404 from './pages/Error404';
 
 // MUI
@@ -50,6 +51,17 @@ function AppContent() {
                 </PrivateRoute>
               }
             />
+            {featurePages.map(({ path, Component }) => (
+              <Route
+                key={path}
+                path={path}
+                element={
+                  <PrivateRoute>
+                    <Component />
+                  </PrivateRoute>
+                }
+              />
+            ))}
             <Route
               path="/settings"
               element={

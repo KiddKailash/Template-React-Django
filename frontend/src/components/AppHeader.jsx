@@ -13,6 +13,7 @@ import LogoutRoundedIcon from '@mui/icons-material/LogoutRounded';
 import SettingsRoundedIcon from '@mui/icons-material/SettingsRounded';
 
 import UserContext from '../contexts/UserContext';
+import { featurePages } from '../featurePages';
 
 export default function AppHeader() {
   const { isLoggedIn, logout } = useContext(UserContext);
@@ -37,6 +38,15 @@ export default function AppHeader() {
           Template App
         </Typography>
         <Box sx={{ flexGrow: 1 }} />
+        {featurePages
+          .filter((page) => page.icon)
+          .map(({ path, label, icon: Icon }) => (
+            <Tooltip key={path} title={label}>
+              <IconButton component={RouterLink} to={path} aria-label={label}>
+                <Icon />
+              </IconButton>
+            </Tooltip>
+          ))}
         <Tooltip title="Settings">
           <IconButton component={RouterLink} to="/settings" aria-label="Settings">
             <SettingsRoundedIcon />
