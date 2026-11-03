@@ -1,0 +1,23 @@
+{% comment %}
+Default HTML body for the email fallback of notify() (utils/delivery.py):
+    Email(subject=..., text=..., template="notifications/email/notification.html",
+          context={"title": ..., "body": ..., "url": "/path"})
+Copy it to your own app's templates to brand it.
+{% endcomment %}<!doctype html>
+<html lang="en">
+  <body style="margin:0;padding:24px;background:#f6f7f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#1f2933;">
+    <table role="presentation" width="100%" style="max-width:560px;margin:0 auto;background:#ffffff;border-radius:8px;padding:24px;">
+      <tr>
+        <td>
+          <h1 style="font-size:20px;margin:0 0 12px;">{{ title }}</h1>
+          <p style="font-size:15px;line-height:1.5;margin:0 0 20px;">{{ body|linebreaksbr }}</p>
+          {% if url %}
+          <p style="margin:0;">
+            <a href="{{ frontend_url }}{{ url }}" style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;padding:10px 16px;border-radius:6px;font-size:14px;">Open</a>
+          </p>
+          {% endif %}
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>

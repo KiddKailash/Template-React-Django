@@ -12,7 +12,9 @@ is valid until it expires and nothing on the server can take it back. A
   - refreshing extends the session to the refresh token's new expiry, and a
     revoked session cannot be refreshed.
 
-Ported from LLMStockAnalysis (accounts/), minus its push-notification link.
+A push subscription is registered from a session (``PushSubscription.session``),
+which is how Settings shows which device notifications go to, and why ending
+a session stops that device's pushes. Ported from LLMStockAnalysis (accounts/).
 """
 
 from __future__ import annotations
@@ -35,12 +37,20 @@ class DeviceSessionQuerySet(models.QuerySet):
         return self.filter(revoked_at__isnull=True, expires_at__gt=timezone.now())
 
     def revoke(self) -> int:
-        """End these sessions. Returns how many were live (ended ones are skipped).
+        """End these sessions and stop pushes to the devices they registered.
 
+        Returns the number of sessions ended (already-ended ones are skipped).
         Extend here if a device holds anything else that should stop with its
-        session (LLMStockAnalysis deactivates the device's push subscriptions).
+        session.
         """
-        return self.filter(revoked_at__isnull=True).update(revoked_at=timezone.now())
+        from notifications.models import PushSubscription
+
+        ids = list(self.filter(revoked_at__isnull=True).values_list("id", flat=True))
+        if not ids:
+            return 0
+        DeviceSession.objects.filter(id__in=ids).update(revoked_at=timezone.now())
+        PushSubscription.objects.filter(session_id__in=ids, active=True).update(active=False)
+        return len(ids)
 
 
 class DeviceSession(models.Model):

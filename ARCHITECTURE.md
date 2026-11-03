@@ -88,7 +88,7 @@ Template-Django-React/
 
 ### 3.2 The Django apps
 
-Five apps ship in the template. `accounts/` is auth plumbing you keep as is: device sessions, sign-in/out,
+Six apps ship in the template. `accounts/` is auth plumbing you keep as is: device sessions, sign-in/out,
 password change (from LLMStockAnalysis + Store-Arbitrage).
 
 ```
@@ -109,6 +109,27 @@ request, and its refresh token stops working. Refreshing extends the session.
 Changing the password keeps the current device and signs out every other.
 To attach more to a device (push subscriptions, say), extend
 `DeviceSessionQuerySet.revoke()`, as LLMStockAnalysis does.
+
+`notifications/` is Web Push with an email fallback (from LLMStockAnalysis):
+
+```
+backend/notifications/
+├── models.py                    PushSubscription (per browser, linked to its DeviceSession),
+│                                PushNotification (retry/dead-letter), NotificationDispatch (audit)
+├── utils/delivery.py            notify(): ONE channel per notification — push to a device
+│                                seen in 14 days, else email (also when the push reaches nobody)
+├── utils/dispatcher.py          pywebpush send (TTL 24 h), 404/410 deactivates, retries 1/5/15 min
+├── utils/preferences.py         allows() opt-out hook + email_address(): wire your preferences here
+├── views.py                     /api/notifications/{vapid-public-key,subscribe,unsubscribe,seen,test}/
+└── management/commands/         gen_vapid_keys, dispatch_pending_pushes (daily cron backstop)
+```
+
+Send from anywhere with `notify(user=..., title=..., body=..., url="/path",
+email=Email(subject=..., text=...))`; it never raises. Ending a session (sign
+out, Settings → Devices, password change) deactivates that device's push
+subscription, and sign-out also unsubscribes the browser, so the next person
+to sign in there is not pushed to on the previous user's permission. Push is
+off until `WEB_PUSH_VAPID_*` are set; until then `notify()` emails.
 
 The rest ship in the harness: `core` is the starter, the other three carry the LLM harness. Extend / rename them for your domain:
 
@@ -261,6 +282,12 @@ All endpoints under `/api/`. JSON in, JSON out. `IsAuthenticated` unless noted.
 - `DELETE /api/sessions/<uuid>/` — sign one device out
 - `POST /api/sessions/revoke-others/` — sign out everywhere else
 
+**Notifications (`notifications/`)**
+- `GET  /api/notifications/vapid-public-key/` — `""` when push is off
+- `POST /api/notifications/subscribe/`, `/unsubscribe/` — this browser's subscription
+- `POST /api/notifications/seen/` — "this device is in use" (keeps it on push, not email)
+- `POST /api/notifications/test/` — push a test to your own devices (throttled `push_test`, 10/hour)
+
 **Example authenticated endpoint**
 - `GET  /api/me/` — returns the current user.
 
@@ -334,7 +361,7 @@ Single axios instance at `${VITE_BACKEND_URL ?? ''}/api` (leave `VITE_BACKEND_UR
 - **Request interceptor:** attaches `Authorization: Bearer <access_token>` from localStorage.
 - **Response interceptor:** on 401 (and not already retried), refreshes via `/api/token/refresh/`, retries; if refresh fails (expired, or the device was signed out), redirects to `/login?next=<where you were>`.
 
-**PWA:** the service worker precaches the app shell only. `/api/` responses are deliberately **not** cached (they are per-user; a URL-keyed cache would show one account's data to the next person on the device and outlive sign-out).
+**PWA:** a custom service worker (`src/sw.js`, vite-plugin-pwa `injectManifest`) precaches the app shell, serves `index.html` for in-app navigations, shows Web Push notifications and routes a click to its page (same-origin only). `src/pwa.js` registers it and polls for new builds hourly and on foreground (iOS standalone PWAs otherwise never update). `services/push.js` holds the subscribe/unsubscribe/activity calls; Settings → Notifications says where notifications go and has the push switch and a test button. It caches the app shell only. `/api/` responses are deliberately **not** cached (they are per-user; a URL-keyed cache would show one account's data to the next person on the device and outlive sign-out).
 
 **Errors:** `ErrorBoundary` wraps the routes, so a render exception shows a recoverable message instead of a white screen; it resets on navigation.
 

@@ -15,6 +15,7 @@ dependencies = [
     "python-dotenv",
     "whitenoise>=6.6.0",
     "requests",
+    "pywebpush>=2.0",
     # Testing + tooling
     "pytest>=9.1.0",
     "pytest-django>=4.12.0",
@@ -28,7 +29,7 @@ dependencies = [
 [tool.pytest.ini_options]
 DJANGO_SETTINGS_MODULE = "config.settings"
 django_find_project = true
-addopts = "--cov=core --cov=accounts --cov=llm --cov=chat --cov=mcp_server --cov-report=term-missing"
+addopts = "--cov=core --cov=accounts --cov=notifications --cov=llm --cov=chat --cov=mcp_server --cov-report=term-missing"
 
 [tool.ruff]
 line-length = 100

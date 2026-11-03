@@ -1,7 +1,6 @@
-// Settings -> Devices: every signed-in device, and sign-out for the others.
-// Presentational: the Settings page owns the overview (GET /api/sessions/) and
-// the revoke calls. Ported from LLMStockAnalysis, minus its push-notification
-// state.
+// Settings -> Devices: every signed-in device, which of them notifications go
+// to, and sign-out for the others. Presentational: the Settings page owns the
+// overview (GET /api/sessions/) and the revoke calls. From LLMStockAnalysis.
 
 import { useState } from 'react';
 
@@ -16,6 +15,8 @@ import Tooltip from '@mui/material/Tooltip';
 import Typography from '@mui/material/Typography';
 import LaptopRoundedIcon from '@mui/icons-material/LaptopRounded';
 import LogoutRoundedIcon from '@mui/icons-material/LogoutRounded';
+import NotificationsActiveRoundedIcon from '@mui/icons-material/NotificationsActiveRounded';
+import NotificationsPausedRoundedIcon from '@mui/icons-material/NotificationsPausedRounded';
 import PhoneIphoneRoundedIcon from '@mui/icons-material/PhoneIphoneRounded';
 import TabletMacRoundedIcon from '@mui/icons-material/TabletMacRounded';
 
@@ -26,6 +27,27 @@ const KIND_ICON = {
   tablet: TabletMacRoundedIcon,
   desktop: LaptopRoundedIcon,
 };
+
+function NotificationBadge({ state }) {
+  if (state === 'receiving') {
+    return (
+      <Tooltip title="Notifications are pushed to this device" placement="left">
+        <NotificationsActiveRoundedIcon fontSize="small" color="primary" />
+      </Tooltip>
+    );
+  }
+  if (state === 'idle') {
+    return (
+      <Tooltip
+        title="Push is on, but this device hasn't opened the app in 14 days, so notifications are emailed instead"
+        placement="left"
+      >
+        <NotificationsPausedRoundedIcon fontSize="small" color="primary" />
+      </Tooltip>
+    );
+  }
+  return null;
+}
 
 function SessionRow({ session, onRevoke, busy }) {
   const Icon = KIND_ICON[session.device?.kind] ?? LaptopRoundedIcon;
@@ -63,20 +85,23 @@ function SessionRow({ session, onRevoke, busy }) {
           </Typography>
         </Box>
       </Stack>
-      {!session.current && (
-        <Tooltip title="Sign out this device" placement="left">
-          <span>
-            <IconButton
-              size="small"
-              disabled={busy}
-              onClick={() => onRevoke(session)}
-              aria-label={`Sign out ${label}`}
-            >
-              <LogoutRoundedIcon fontSize="small" />
-            </IconButton>
-          </span>
-        </Tooltip>
-      )}
+      <Stack direction="row" spacing={2} alignItems="center" sx={{ flexShrink: 0 }}>
+        <NotificationBadge state={session.notifications} />
+        {!session.current && (
+          <Tooltip title="Sign out this device" placement="left">
+            <span>
+              <IconButton
+                size="small"
+                disabled={busy}
+                onClick={() => onRevoke(session)}
+                aria-label={`Sign out ${label}`}
+              >
+                <LogoutRoundedIcon fontSize="small" />
+              </IconButton>
+            </span>
+          </Tooltip>
+        )}
+      </Stack>
     </Stack>
   );
 }
@@ -108,7 +133,7 @@ export default function DeviceSessions({ overview, loading, onRevoke, onRevokeOt
   return (
     <Box>
       <Typography variant="caption" color="text.secondary">
-        Signing a device out ends its session immediately.
+        Signing a device out ends its session immediately and stops its push notifications.
       </Typography>
       <Box role="list" aria-label="Signed-in devices" sx={{ mt: 0.5 }}>
         {sessions.map((session, i) => (

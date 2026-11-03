@@ -11,9 +11,11 @@ import Typography from '@mui/material/Typography';
 import DarkModeRoundedIcon from '@mui/icons-material/DarkModeRounded';
 import DevicesRoundedIcon from '@mui/icons-material/DevicesRounded';
 import LightModeRoundedIcon from '@mui/icons-material/LightModeRounded';
+import NotificationsRoundedIcon from '@mui/icons-material/NotificationsRounded';
 import PersonRoundedIcon from '@mui/icons-material/PersonRounded';
 
 import ChangePasswordForm from '../components/ChangePasswordForm';
+import NotificationSettings from '../components/NotificationSettings';
 import DeviceSessions from '../components/DeviceSessions';
 import { SnackbarContext } from '../contexts/SnackbarContext';
 import { useThemeContext } from '../contexts/ThemeContext';
@@ -116,6 +118,19 @@ export default function Settings() {
         <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
           Changing your password signs out every other device.
         </Typography>
+      </Section>
+      <Divider />
+
+      <Section
+        icon={<NotificationsRoundedIcon fontSize="small" sx={iconSx} />}
+        title="Notifications"
+      >
+        <NotificationSettings
+          overview={overview}
+          loading={loading}
+          onChange={loadSessions}
+          showSnackbar={showSnackbar}
+        />
       </Section>
       <Divider />
 

@@ -65,6 +65,7 @@ INSTALLED_APPS = [
     "corsheaders",
     # Local
     "accounts",
+    "notifications",
     "core",
     "llm",
     "chat",
@@ -142,6 +143,8 @@ REST_FRAMEWORK = {
         "user": "120/min",
         # Sign-in, keyed by IP (accounts/throttling.py). Refresh is excluded.
         "auth": "20/hour",
+        # "Send a test notification" (notifications/views.py), per user.
+        "push_test": "10/hour",
     },
     # REMOTE_ADDR is nginx, so throttles key on X-Forwarded-For. nginx resolves
     # the real client (real_ip, nginx/default.conf) and appends it last, so
@@ -316,6 +319,24 @@ LLM_MAX_TOOL_TURNS = int(os.getenv("LLM_MAX_TOOL_TURNS", "10"))
 MCP_ENABLED = os.getenv("MCP_ENABLED", "true").lower() == "true"
 
 
+# ---------------------------------------------------------------------------
+# Web Push (notifications/). Generate a keypair with
+# `uv run python manage.py gen_vapid_keys`. Empty private key = push off: the
+# Settings toggle says so, and notify() falls back to email.
+# ---------------------------------------------------------------------------
+
+WEB_PUSH_VAPID_PUBLIC_KEY = os.getenv("WEB_PUSH_VAPID_PUBLIC_KEY", "")
+WEB_PUSH_VAPID_PRIVATE_KEY = os.getenv("WEB_PUSH_VAPID_PRIVATE_KEY", "")
+# A contact for push services to reach about this sender (RFC 8292). Use an
+# address you read; some push services reject example.com.
+WEB_PUSH_VAPID_SUBJECT = os.getenv("WEB_PUSH_VAPID_SUBJECT", "mailto:admin@example.com")
+# How long a push service keeps a message for a device that is offline or
+# asleep. pywebpush's default (0) drops it unless the device is reachable at
+# that instant.
+WEB_PUSH_TTL_SECONDS = int(os.getenv("WEB_PUSH_TTL_SECONDS", str(24 * 60 * 60)))
+
+
+# ---------------------------------------------------------------------------
 # Logging: one stdout stream with ISO timestamps and logger names, which
 # `docker compose logs` and cron redirects keep in order. From Store-Arbitrage.
 # ---------------------------------------------------------------------------
@@ -343,7 +364,7 @@ LOGGING = {
         # Project apps; add yours here.
         **{
             app: {"handlers": ["stdout"], "level": APP_LOG_LEVEL, "propagate": False}
-            for app in ("accounts", "core", "llm", "chat", "mcp_server")
+            for app in ("accounts", "notifications", "core", "llm", "chat", "mcp_server")
         },
         "django": {"handlers": ["stdout"], "level": "INFO", "propagate": False},
         # Per-request noise; gunicorn already records access lines.

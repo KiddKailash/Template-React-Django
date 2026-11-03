@@ -89,7 +89,15 @@ cp .env.example .env    # fill in VITE_BACKEND_URL
 npm run dev             # http://localhost:5173
 ```
 
-### 3. (Optional) Chroma for RAG — off by default
+### 3. (Optional) Web Push notifications
+
+```bash
+cd backend && uv run python manage.py gen_vapid_keys   # paste both lines into backend/.env
+```
+
+Set `WEB_PUSH_VAPID_SUBJECT` to a `mailto:` you read, restart, then Settings → Notifications → turn on push and **Send a test notification**. Without keys, `notify()` sends email instead. Browsers only allow push on `https://` or `localhost`; on iPhone/iPad the app must be added to the Home Screen first.
+
+### 4. (Optional) Chroma for RAG — off by default
 
 The infrastructure is kept, but disabled: the `chroma` service sits behind a compose profile, so neither `docker compose up` nor the deploy starts it, and no Python code depends on it. To use a vector store:
 

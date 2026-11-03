@@ -7,9 +7,17 @@ export default defineConfig({
   plugins: [
     react(),
     VitePWA({
+      // Custom service worker (src/sw.js): precaches the app shell and handles
+      // Web Push. Registered by src/pwa.js, which also polls for new builds.
+      strategies: 'injectManifest',
+      srcDir: 'src',
+      filename: 'sw.js',
       registerType: 'autoUpdate',
-      injectRegister: 'auto',
-      includeAssets: ['app-icon.svg'],
+      injectRegister: false,
+      injectManifest: {
+        maximumFileSizeToCacheInBytes: 1024 * 1024 * 10, // 10MB
+      },
+      includeAssets: ['app-icon.svg', 'icon-192.png', 'icon-512.png'],
       manifest: {
         name: 'Template App',
         short_name: 'Template',
@@ -21,27 +29,11 @@ export default defineConfig({
         theme_color: '#2563EB',
         orientation: 'portrait',
         icons: [
-          {
-            src: 'app-icon.svg',
-            sizes: 'any',
-            type: 'image/svg+xml',
-            purpose: 'any',
-          },
+          { src: 'app-icon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any' },
+          // PNGs too: Android's install prompt and notification icons need them.
+          { src: 'icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
+          { src: 'icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
         ],
-      },
-      workbox: {
-        mode: 'development',
-        cleanupOutdatedCaches: true,
-        clientsClaim: true,
-        skipWaiting: true,
-        maximumFileSizeToCacheInBytes: 1024 * 1024 * 10, // 10MB
-        navigateFallbackDenylist: [/^\/media\//, /^\/api\//, /^\/admin\//, /^\/static\//],
-        // No runtime caching of /api/ (it used to be NetworkFirst, 24 h). API
-        // responses are per-user and authenticated: a cache keyed by URL alone
-        // serves one account's data to the next person who signs in on the
-        // device, and keeps it readable offline after "Sign out" or after the
-        // session is ended from another device. Add a narrowly scoped route
-        // (public, non-personal endpoints only) if a project needs offline reads.
       },
     }),
   ],
