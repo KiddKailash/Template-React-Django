@@ -64,20 +64,39 @@ class SessionTokenRefreshSerializer(TokenRefreshSerializer):
 
 
 class DeviceSessionSerializer(serializers.ModelSerializer):
-    """A session as Settings lists it. ``current_id`` comes in through context."""
+    """A session as Settings lists it.
+
+    ``current`` and ``notifications`` depend on the request and the user's push
+    subscriptions, so the view passes them in through context: ``current_id``
+    and ``push_state`` (session id → "receiving" | "idle").
+    """
 
     device = serializers.SerializerMethodField()
     current = serializers.SerializerMethodField()
+    notifications = serializers.SerializerMethodField()
 
     class Meta:
         model = DeviceSession
-        fields = ["id", "device", "ip_address", "created_at", "last_seen_at", "current"]
+        fields = [
+            "id",
+            "device",
+            "ip_address",
+            "created_at",
+            "last_seen_at",
+            "current",
+            "notifications",
+        ]
 
     def get_device(self, obj) -> dict:
         return describe(obj.user_agent)
 
     def get_current(self, obj) -> bool:
         return str(obj.pk) == self.context.get("current_id")
+
+    def get_notifications(self, obj) -> str:
+        """ "receiving" (push goes here), "idle" (push on, but not used for 14
+        days, so email instead) or "off"."""
+        return self.context.get("push_state", {}).get(str(obj.pk), "off")
 
 
 class ChangePasswordSerializer(serializers.Serializer):

@@ -101,8 +101,10 @@ log_sep
 case "$MODE" in
 
     daily)
-        # Example placeholder — replace with your daily commands.
-        log "No daily commands configured. Add them to cron/orchestrate.sh."
+        # Backstop for push retries (notifications/): queue_push() already
+        # flushes due retries on every send; this catches a failure with
+        # nothing sent since. Add your daily commands below it.
+        run_cmd "push retries" dispatch_pending_pushes
         ;;
 
     nightly)

@@ -21,4 +21,5 @@ urlpatterns = [
     path("api/auth/logout/", LogoutView.as_view(), name="logout"),
     path("api/auth/password/", ChangePasswordView.as_view(), name="change_password"),
     path("api/sessions/", include("accounts.urls")),
+    path("api/notifications/", include("notifications.urls")),
 ] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

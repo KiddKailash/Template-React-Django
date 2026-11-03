@@ -2,6 +2,7 @@
 import { createContext, useState, useEffect } from 'react';
 import { login as apiLogin } from '../services/authService';
 import { clearTokens, fetchCurrentUser, logoutSession } from '../services/api';
+import { forgetThisDevice, reportDeviceActivity } from '../services/push';
 
 const UserContext = createContext();
 
@@ -59,6 +60,7 @@ export const UserProvider = ({ children }) => {
     } catch {
       // Offline, or the session was already ended elsewhere.
     }
+    await forgetThisDevice();
     clearTokens();
     // Earlier template builds cached /api/ responses in the service worker
     // (vite.config.js); drop that cache so nothing personal survives sign-out.
@@ -67,6 +69,18 @@ export const UserProvider = ({ children }) => {
     }
     setUser(null);
   };
+
+  // While signed in, keep this device on push rather than email: report that
+  // the app is open now and whenever it comes back to the foreground.
+  useEffect(() => {
+    if (!user) return undefined;
+    reportDeviceActivity();
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') reportDeviceActivity();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, [user]);
 
   return (
     <UserContext.Provider value={{ user, login, logout, loading, isLoggedIn: !!user }}>

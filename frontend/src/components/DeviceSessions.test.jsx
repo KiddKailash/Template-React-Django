@@ -20,6 +20,7 @@ const session = (overrides) => ({
   created_at: '2026-10-01T09:00:00Z',
   last_seen_at: new Date().toISOString(),
   current: false,
+  notifications: 'off',
   ...overrides,
 });
 
@@ -36,7 +37,7 @@ describe('DeviceSessions', () => {
               current: true,
               device: { kind: 'desktop', label: 'Chrome on macOS' },
             }),
-            session({ id: 'phone' }),
+            session({ id: 'phone', notifications: 'receiving' }),
           ],
         }}
         onRevoke={noop}
@@ -47,22 +48,29 @@ describe('DeviceSessions', () => {
     expect(html).toContain('This device');
     expect(html).toContain('Active now');
     expect(html).toContain('203.0.113.7');
+    // The notification state is an icon (its words live in a tooltip).
+    expect(html).toContain('data-testid="NotificationsActiveRoundedIcon"');
     expect(html).toContain('aria-label="Sign out Safari on iPhone"');
     expect(html).not.toContain('aria-label="Sign out Chrome on macOS"');
     expect(html).toContain('Sign out the other device');
   });
 
-  it('pluralises sign-out-all', () => {
+  it('pluralises sign-out-all and shows paused push', () => {
     const html = render(
       <DeviceSessions
         overview={{
-          sessions: [session({ id: 'here', current: true }), session({ id: 'b' }), session({ id: 'c' })],
+          sessions: [
+            session({ id: 'here', current: true }),
+            session({ id: 'b', notifications: 'idle' }),
+            session({ id: 'c' }),
+          ],
         }}
         onRevoke={noop}
         onRevokeOthers={noop}
       />,
     );
     expect(html).toContain('Sign out all 2 other devices');
+    expect(html).toContain('data-testid="NotificationsPausedRoundedIcon"');
   });
 
   it('has no sign-out-all when this is the only device', () => {
