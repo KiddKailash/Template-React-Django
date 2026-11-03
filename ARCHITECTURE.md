@@ -88,7 +88,29 @@ Template-Django-React/
 
 ### 3.2 The Django apps
 
-Four apps ship in the template — `core` is the starter, the other three carry the LLM harness. Extend / rename them for your domain:
+Five apps ship in the template. `accounts/` is auth plumbing you keep as is: device sessions, sign-in/out,
+password change (from LLMStockAnalysis + Store-Arbitrage).
+
+```
+backend/accounts/
+├── models.py                    DeviceSession: one row per sign-in
+├── authentication.py            SessionJWTAuthentication (JWT + live-session check)
+├── serializers.py               Session-bound token obtain/refresh, ChangePassword
+├── views.py                     /api/token/*, /api/auth/*, /api/sessions/*
+├── throttling.py                AuthRateThrottle (`auth` scope, per IP)
+└── utils/                       devices.py (UA → "Safari on iPhone", client IP), sessions.py
+```
+
+**Device sessions.** SimpleJWT alone cannot sign anyone out: a token is valid
+until it expires. Signing in creates a `DeviceSession` whose id rides in both
+tokens as the `sid` claim; every request checks that session is live (one
+indexed read), so ending it from Settings signs that device out on its next
+request, and its refresh token stops working. Refreshing extends the session.
+Changing the password keeps the current device and signs out every other.
+To attach more to a device (push subscriptions, say), extend
+`DeviceSessionQuerySet.revoke()`, as LLMStockAnalysis does.
+
+The rest ship in the harness: `core` is the starter, the other three carry the LLM harness. Extend / rename them for your domain:
 
 ```
 backend/
@@ -206,11 +228,17 @@ admin, the `/api/mcp/tokens/<id>/revoke/` endpoint, or `McpToken.revoke()`.
 - `wsgi.py` — production entry point (Gunicorn).
 - `asgi.py` — present but unused in prod.
 
-**Auth:** JWT. Endpoints require `IsAuthenticated` by default. Token endpoints are `POST /api/token/` and `POST /api/token/refresh/`.
+**Auth:** JWT bound to a device session (`accounts/`). Endpoints require `IsAuthenticated` by default.
+
+**API hardening (from Store-Arbitrage):** JSON-only rendering outside DEBUG (the browsable API would print view docstrings); `OPTIONS` omits docstrings (`core/metadata.py`); DRF throttles `anon` 60/min, `user` 120/min, and `auth` 20/hour per IP on sign-in; `DRF_NUM_PROXIES` tells the throttles which `X-Forwarded-For` entry is the client.
+
+**TLS (`DJANGO_BEHIND_TLS`, default true):** outside DEBUG, https redirect (health check exempt), HSTS, `Secure` cookies. nginx forwards the client's real scheme (`$forwarded_scheme`), so this cannot loop behind a tunnel. Set false only for a plain-HTTP LAN deployment.
+
+**Logging:** one stdout stream, ISO timestamps + logger names (`LOGGING`, level `APP_LOG_LEVEL`).
 
 **Middleware order:** Security → WhiteNoise → CORS → Session → CSRF → Auth → Messages → XFrameOptions (`SAMEORIGIN`).
 
-**Required env vars** (see README + `backend/.env.example`): `SECRET_KEY`, `DJANGO_DEBUG`, `ALLOWED_HOSTS`, `CORS_ALLOWED_ORIGINS`, `CSRF_TRUSTED_ORIGINS`, `DB_*`, `FRONTEND_URL`, `EMAIL_*`, `INITIAL_USERS`, `HEALTHCHECK_URL`.
+**Required env vars** (see README + `backend/.env.example`): `SECRET_KEY`, `DJANGO_DEBUG`, `DJANGO_BEHIND_TLS`, `DRF_NUM_PROXIES`, `ALLOWED_HOSTS`, `CORS_ALLOWED_ORIGINS`, `CSRF_TRUSTED_ORIGINS`, `DB_*`, `FRONTEND_URL`, `EMAIL_*`, `INITIAL_USERS`, `HEALTHCHECK_URL`.
 
 **LLM / MCP env vars** (all optional; the harness fails cleanly when unset):
 `OPENROUTER_API_KEY`, `OPENROUTER_DEFAULT_MODEL`, `OPENROUTER_HEAVY_MODEL`,
@@ -223,8 +251,15 @@ admin, the `/api/mcp/tokens/<id>/revoke/` endpoint, or `McpToken.revoke()`.
 All endpoints under `/api/`. JSON in, JSON out. `IsAuthenticated` unless noted.
 
 **Auth & health (public)**
-- `POST /api/token/`, `POST /api/token/refresh/`
+- `POST /api/token/` (sign in; opens a device session; `auth` throttle), `POST /api/token/refresh/`
 - `GET  /api/health/`
+
+**Account & devices (`accounts/`)**
+- `POST /api/auth/logout/` — end this device's session
+- `POST /api/auth/password/` — change password; signs every other device out
+- `GET  /api/sessions/` — live sessions, this device first
+- `DELETE /api/sessions/<uuid>/` — sign one device out
+- `POST /api/sessions/revoke-others/` — sign out everywhere else
 
 **Example authenticated endpoint**
 - `GET  /api/me/` — returns the current user.
@@ -248,7 +283,7 @@ Two mechanisms, no queue:
 
 ### 3.6 Tests
 
-- `core/tests/` — pytest. `conftest.py` at the backend root provides shared fixtures (`user`, `authenticated_client`, factories).
+- `core/tests/`, `accounts/tests/` — pytest. `conftest.py` at the backend root provides shared fixtures (`user`, `authenticated_client`, factories) and clears the cache around every test (throttle counters live there).
 - Run: from `backend/`, `uv run pytest`.
 - Lint: from `backend/`, `uv run ruff check .` then `uv run ruff format .`.
 
@@ -273,9 +308,11 @@ frontend/src/
 ├── main.jsx             Vite entry
 ├── pages/               One per top-level route
 │   ├── Home.jsx
-│   ├── AuthPage.jsx
+│   ├── AuthPage.jsx     Honours ?next= (same-site paths only, utils/safeNext.js)
+│   ├── Settings.jsx     Account (password), Devices (sessions), Appearance
 │   └── Error404.jsx
-├── components/          Shared UI (e.g. PrivateRoute)
+├── components/          Shared UI: PrivateRoute, AppHeader, ErrorBoundary,
+│                        DeviceSessions, ChangePasswordForm
 ├── contexts/            UserContext, SnackbarContext, ThemeContext
 ├── services/            api.js (axios instance + endpoint wrappers)
 ├── styles/              theme.js — single source of MUI theme
@@ -286,15 +323,20 @@ frontend/src/
 
 No Redux / Zustand. State is React Context + local component state:
 
-- `UserContext` — auth state; reads/writes `access_token` + `refresh_token` in localStorage; exposes `login` / `logout`.
+- `UserContext` — auth state; reads/writes `access_token` + `refresh_token` in localStorage; exposes `login` / `logout` (logout ends the device session on the server, then forgets the tokens).
 - `SnackbarContext` — global toast singleton.
 - `ThemeContext` — light/dark toggle, persisted to localStorage.
 
 ### 4.4 API client (`services/api.js`)
 
-Single axios instance at `${VITE_BACKEND_URL}/api`:
+Single axios instance at `${VITE_BACKEND_URL ?? ''}/api` (leave `VITE_BACKEND_URL` empty in production: same-origin `/api`):
+- **No instance-wide `Content-Type`**: axios labels each body itself, so `FormData` uploads go out as multipart (a JSON default made them fail with 415 in Store-Arbitrage).
 - **Request interceptor:** attaches `Authorization: Bearer <access_token>` from localStorage.
-- **Response interceptor:** on 401 (and not already retried), refreshes via `/api/token/refresh/`, retries; if refresh fails, redirects to `/login`.
+- **Response interceptor:** on 401 (and not already retried), refreshes via `/api/token/refresh/`, retries; if refresh fails (expired, or the device was signed out), redirects to `/login?next=<where you were>`.
+
+**PWA:** the service worker precaches the app shell only. `/api/` responses are deliberately **not** cached (they are per-user; a URL-keyed cache would show one account's data to the next person on the device and outlive sign-out).
+
+**Errors:** `ErrorBoundary` wraps the routes, so a render exception shows a recoverable message instead of a white screen; it resets on navigation.
 
 ### 4.5 Styling & design system
 
@@ -310,6 +352,7 @@ npm install
 npm run dev        # Vite @ http://localhost:5173
 npm run build      # → frontend/dist/
 npm run lint       # ESLint
+npm test           # Vitest (node env; components via react-dom/server)
 npm run preview
 ```
 
@@ -324,7 +367,14 @@ npm run preview
 | `chroma` | `chromadb/chroma:1.5.8` | Vector store HTTP server, **off by default**: behind compose profile `chroma`, so `up` and the deploy skip it and the backend's dependency on it is `required: false`. Delete the `profiles:` line to enable. Volume: `chroma_data`. |
 | `db` | `postgres:15-alpine` | App database. Healthcheck: `pg_isready`. Volume: `postgres_data`. |
 | `backend` | Built from `backend/Dockerfile` | Django + Gunicorn. Runs `collectstatic` + `migrate` on startup. Volumes: `./backend`, `media_data`. |
-| `nginx` | `nginx:alpine` | Reverse proxy + SPA host. Mounts `nginx/default.conf`, `frontend/dist`, `media_data`. Only published port (`:80`). 50 MB body limit for uploads. |
+| `nginx` | `nginx:alpine` | Reverse proxy + SPA host. Mounts `nginx/default.conf`, `frontend/dist`, `media_data`. Only published port (`:80`). 8 MB default body limit; stream bigger uploads per route (see `nginx/default.conf`). |
+
+**nginx (`nginx/default.conf`)** carries the edge hardening from Store-Arbitrage and LLMStockAnalysis:
+- **Real client IP** from `X-Forwarded-For` trusted only from Docker bridge addresses; **`$forwarded_scheme`** passes the tunnel's real scheme to Django (forwarding nginx's own `$scheme` would make `DJANGO_BEHIND_TLS` redirect-loop).
+- **Security headers** on every response: `nosniff`, `Referrer-Policy`, `Cross-Origin-Opener-Policy`, `Permissions-Policy`, `X-Robots-Tag` (api/admin/static), and a baseline **CSP** for a same-origin Vite + MUI app; widen it when the app really loads from another origin. A location's own `add_header` replaces the whole set (nginx inheritance), so caching uses `expires`, and `/media/` repeats what it needs plus a sandboxing CSP for user uploads.
+- **Caching:** the SPA shell revalidates on every load (new builds reach installed PWAs); hashed `/assets/` are cached for good.
+- **`limit_req`** per client on `/api/` and `/admin/` (30 r/s, bursts 60/30) in front of DRF's throttles; gzip; relative redirects.
+- **Memory:** responses are never spooled to disk, bodies are capped at 8m, and socket buffers are capped in compose. Details are in the file.
 
 nginx routes:
 - `/api/` → `backend:8000` (60s timeouts)

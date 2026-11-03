@@ -34,6 +34,22 @@ def scrub_external_env(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# Cache isolation: DRF throttle counters live in the default cache, which
+# outlives a test. Without this, sign-ins add up across the suite and later
+# tests get 429 from the `auth` budget.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _clear_cache():
+    from django.core.cache import cache
+
+    cache.clear()
+    yield
+    cache.clear()
+
+
+# ---------------------------------------------------------------------------
 # Users + auth
 # ---------------------------------------------------------------------------
 

@@ -28,6 +28,25 @@ DEBUG = os.getenv("DJANGO_DEBUG", "false").lower() == "true"
 
 ALLOWED_HOSTS = [h.strip() for h in os.getenv("ALLOWED_HOSTS", "").split(",") if h.strip()]
 
+# Whether TLS terminates in front of this deployment (Cloudflare Tunnel, Caddy).
+# Defaults to true, so a missing variable fails closed. Set false only on a
+# plain-HTTP deployment (e.g. LAN-only): browsers refuse `Secure` cookies over
+# HTTP, which breaks CSRF and admin login. nginx forwards the client's real
+# scheme (the `$forwarded_scheme` map in nginx/default.conf), so the redirect
+# below cannot loop behind a tunnel. From Store-Arbitrage.
+BEHIND_TLS = os.getenv("DJANGO_BEHIND_TLS", "true").lower() == "true"
+
+if not DEBUG and BEHIND_TLS:
+    SECURE_SSL_REDIRECT = True
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+    # The compose healthcheck probes plain http://localhost:8000/api/health/
+    # from inside the container; it must not be redirected to https.
+    SECURE_REDIRECT_EXEMPT = [r"^api/health/$"]
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SECURE_HSTS_SECONDS = 31536000
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+
 
 # ---------------------------------------------------------------------------
 # Applications
@@ -45,6 +64,7 @@ INSTALLED_APPS = [
     "rest_framework_simplejwt",
     "corsheaders",
     # Local
+    "accounts",
     "core",
     "llm",
     "chat",
@@ -98,13 +118,40 @@ CORS_ALLOW_HEADERS = [
 # ---------------------------------------------------------------------------
 
 REST_FRAMEWORK = {
-    "DEFAULT_AUTHENTICATION_CLASSES": (
-        "rest_framework_simplejwt.authentication.JWTAuthentication",
-    ),
+    # SimpleJWT plus a live DeviceSession check, so signing a device out from
+    # Settings takes effect on its next request (accounts/authentication.py).
+    "DEFAULT_AUTHENTICATION_CLASSES": ("accounts.authentication.SessionJWTAuthentication",),
     "DEFAULT_PERMISSION_CLASSES": [
         "rest_framework.permissions.IsAuthenticated",
     ],
+    # JSON only outside DEBUG. The browsable renderer prints each view's
+    # docstring (maintainer notes) to anyone who opens an API URL in a browser.
+    "DEFAULT_RENDERER_CLASSES": (
+        ("rest_framework.renderers.JSONRenderer",)
+        + (("rest_framework.renderers.BrowsableAPIRenderer",) if DEBUG else ())
+    ),
+    # The same docstrings, served as JSON to an OPTIONS request.
+    "DEFAULT_METADATA_CLASS": "core.metadata.PublicMetadata",
+    "DEFAULT_THROTTLE_CLASSES": [
+        "rest_framework.throttling.AnonRateThrottle",
+        "rest_framework.throttling.UserRateThrottle",
+    ],
+    "DEFAULT_THROTTLE_RATES": {
+        # Blunt ceilings against loops and runaway clients.
+        "anon": "60/min",
+        "user": "120/min",
+        # Sign-in, keyed by IP (accounts/throttling.py). Refresh is excluded.
+        "auth": "20/hour",
+    },
+    # REMOTE_ADDR is nginx, so throttles key on X-Forwarded-For. nginx resolves
+    # the real client (real_ip, nginx/default.conf) and appends it last, so
+    # trusting exactly one entry is right whatever proxies sit in front.
+    "NUM_PROXIES": int(os.getenv("DRF_NUM_PROXIES", "1")),
 }
+
+# Throttle counters live in the default cache (per-process LocMemCache): a
+# runaway guard, reset when gunicorn recycles a worker, not a security control.
+# Use a shared CACHES backend (Redis) if that matters.
 
 SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(hours=24),
@@ -143,12 +190,18 @@ WSGI_APPLICATION = "config.wsgi.application"
 # Dev fallback: SQLite when DB_NAME is unset.
 # ---------------------------------------------------------------------------
 if os.getenv("DB_NAME"):
+    # os.getenv has no `required=`; this used to raise TypeError at startup.
+    db_user, db_password = os.getenv("DB_USER"), os.getenv("DB_PASSWORD")
+    if not db_user or not db_password:
+        raise ImproperlyConfigured(
+            "DB_USER and DB_PASSWORD must both be set (non-empty) when DB_NAME is set"
+        )
     DATABASES = {
         "default": {
             "ENGINE": "django.db.backends.postgresql",
             "NAME": os.getenv("DB_NAME"),
-            "USER": os.getenv("DB_USER", required=True),
-            "PASSWORD": os.getenv("DB_PASSWORD", required=True),
+            "USER": db_user,
+            "PASSWORD": db_password,
             "HOST": os.getenv("DB_HOST", "db"),
             "PORT": os.getenv("DB_PORT", "5432"),
             "CONN_MAX_AGE": 60,
@@ -261,3 +314,41 @@ LLM_MAX_TOOL_TURNS = int(os.getenv("LLM_MAX_TOOL_TURNS", "10"))
 # Kill switch. When False, `/api/mcp/` returns 503 without touching the
 # tool registry. Useful for one-click disable during an incident.
 MCP_ENABLED = os.getenv("MCP_ENABLED", "true").lower() == "true"
+
+
+# Logging: one stdout stream with ISO timestamps and logger names, which
+# `docker compose logs` and cron redirects keep in order. From Store-Arbitrage.
+# ---------------------------------------------------------------------------
+
+APP_LOG_LEVEL = os.getenv("APP_LOG_LEVEL", "INFO").upper()
+
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "verbose": {
+            "format": "%(asctime)s %(levelname)-8s %(name)s %(message)s",
+            "datefmt": "%Y-%m-%dT%H:%M:%S%z",
+        },
+    },
+    "handlers": {
+        "stdout": {
+            "class": "logging.StreamHandler",
+            "stream": "ext://sys.stdout",
+            "formatter": "verbose",
+        },
+    },
+    "root": {"handlers": ["stdout"], "level": "WARNING"},
+    "loggers": {
+        # Project apps; add yours here.
+        **{
+            app: {"handlers": ["stdout"], "level": APP_LOG_LEVEL, "propagate": False}
+            for app in ("accounts", "core", "llm", "chat", "mcp_server")
+        },
+        "django": {"handlers": ["stdout"], "level": "INFO", "propagate": False},
+        # Per-request noise; gunicorn already records access lines.
+        "django.server": {"handlers": ["stdout"], "level": "WARNING", "propagate": False},
+        # Chatty at DEBUG, and can leak header values.
+        "urllib3": {"handlers": ["stdout"], "level": "WARNING", "propagate": False},
+    },
+}

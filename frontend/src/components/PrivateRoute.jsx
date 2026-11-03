@@ -1,5 +1,5 @@
 import { useContext } from 'react';
-import { Navigate } from 'react-router-dom';
+import { Navigate, useLocation } from 'react-router-dom';
 import Box from '@mui/material/Box';
 import CircularProgress from '@mui/material/CircularProgress';
 
@@ -7,6 +7,7 @@ import UserContext from '../contexts/UserContext';
 
 const PrivateRoute = ({ children }) => {
   const { user, loading } = useContext(UserContext);
+  const location = useLocation();
 
   if (loading) {
     return (
@@ -23,7 +24,9 @@ const PrivateRoute = ({ children }) => {
     );
   }
 
-  return user ? children : <Navigate to="/login" />;
+  if (user) return children;
+  const next = location.pathname + location.search;
+  return <Navigate to={next === '/' ? '/login' : `/login?next=${encodeURIComponent(next)}`} replace />;
 };
 
 export default PrivateRoute;

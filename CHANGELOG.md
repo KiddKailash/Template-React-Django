@@ -24,6 +24,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `MCP_ENABLED` kill switch returns 503 without touching the tool registry.
 - 59 backend tests covering models, protocol, rate limit, privacy walker, tool loop, cost cap, and registry validation.
 
+### Added
+- **Device sessions** (`backend/accounts/`, from LLMStockAnalysis). Each sign-in is a `DeviceSession` bound into the JWTs (`sid`), checked on every request, so sign-out is real: `POST /api/auth/logout/` ends this device, and **Settings → Devices** lists every signed-in device (browser/OS, IP, last active) and signs any or all others out immediately. Refresh extends a live session and is refused for an ended one.
+- **Change password** (`POST /api/auth/password/`, from Store-Arbitrage) with Django's validators; keeps this device and signs out every other.
+- **Settings page** (`/settings`: Account, Devices, Appearance), an app header (Settings, Sign out), and `?next=` after sign-in (same-site paths only).
+- **API hardening** (from Store-Arbitrage): DRF throttles (`anon`, `user`, and `auth` 20/hour per IP on sign-in), JSON-only rendering outside DEBUG, `OPTIONS` without docstrings, `DJANGO_BEHIND_TLS` (https redirect, HSTS, Secure cookies), stdout `LOGGING`.
+- **nginx edge hardening** (from Store-Arbitrage/LLMStockAnalysis): real client IP, `$forwarded_scheme`, security headers + baseline CSP, sandboxed `/media/`, `limit_req`, gzip, relative redirects, revalidated SPA shell, immutable `/assets/`.
+- `ErrorBoundary` around the routes (from Store-Arbitrage); Vitest with render tests (`npm test`).
+
+### Fixed
+- Postgres settings crashed at startup: `os.getenv(..., required=True)` is not a thing (TypeError whenever `DB_NAME` was set). Now an explicit `ImproperlyConfigured` when `DB_USER`/`DB_PASSWORD` are missing.
+- nginx forwarded its own `$scheme` (always `http` behind a tunnel) as `X-Forwarded-Proto`.
+- File uploads: the axios instance no longer forces `Content-Type: application/json` (it turned `FormData` into JSON → 415). A missing `VITE_BACKEND_URL` no longer produces `undefined/api`.
+- Sign-out only forgot the tokens locally; they stayed valid for up to 14 days.
+- The service worker cached every `/api/` response for 24 h (per-user data, readable after sign-out); it now caches the app shell only, and sign-out deletes the old cache.
+
 ### Changed
 - Chroma is disabled by default and kept as infrastructure: the `chroma` service sits behind compose profile `chroma` (backend dependency `required: false`), the deploy starts it only when the profile is active, and the Makefile's chroma dump/restore is opt-in (`WITH_CHROMA=1`). Delete the `profiles:` line to enable. No backend code used it.
 
