@@ -10,7 +10,15 @@
 name: changeme
 
 services:
+  # Chroma (vector store for RAG) is OFF by default: the `chroma` profile below
+  # keeps it out of `docker compose up` and the deploy. To turn it on for a
+  # project, delete the `profiles:` line (a property of the repo, committed),
+  # then use it from the backend via settings.CHROMA_HOST / CHROMA_PORT.
+  # Everything else (volume, healthcheck, backend wiring, deploy step,
+  # Makefile WITH_CHROMA=1 data sync, run_chroma.py for local dev) is already
+  # in place and follows the switch.
   chroma:
+    profiles: ["chroma"]
     image: chromadb/chroma:1.5.8
     volumes:
       - chroma_data:/data
@@ -52,8 +60,10 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      # required: false -- waited on only while the chroma profile is active.
       chroma:
         condition: service_healthy
+        required: false
     env_file:
       - ./backend/.env
     environment:

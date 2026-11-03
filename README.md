@@ -87,13 +87,13 @@ cp .env.example .env    # fill in VITE_BACKEND_URL
 npm run dev             # http://localhost:5173
 ```
 
-### 3. (Optional) Chroma for RAG
+### 3. (Optional) Chroma for RAG — off by default
 
-```bash
-uv run run_chroma.py    # http://localhost:8001
-```
+The infrastructure is kept, but disabled: the `chroma` service sits behind a compose profile, so neither `docker compose up` nor the deploy starts it, and no Python code depends on it. To use a vector store:
 
-Remove `run_chroma.py`, the `chroma` service in `docker-compose.yml`, and the `CHROMA_*` env vars if you don't need a vector store.
+1. Delete the `profiles: ["chroma"]` line from the `chroma` service in `docker-compose.yml`. The deploy, and the backend's wait-for-healthy, follow automatically.
+2. Run it locally with `uv run run_chroma.py` (http://localhost:8001), and read `settings.CHROMA_HOST` / `CHROMA_PORT` from the backend.
+3. Use `make data-sync WITH_CHROMA=1` (or set `WITH_CHROMA ?= 1` in the Makefile) to include its volume in data syncs.
 
 ---
 
@@ -136,7 +136,7 @@ DB_USER=postgres
 DB_PASSWORD=postgres
 DB_PORT=5432
 
-# ── Chroma (optional — remove if not using RAG) ───────────────────────────────
+# ── Chroma (only if enabled — see "Chroma for RAG") ───────────────────────────────
 CHROMA_HOST=localhost
 CHROMA_PORT=8001
 ```
@@ -159,7 +159,7 @@ docker compose up --build # backend/.env and frontend/.env must exist too
 - SPA + API: <http://localhost:8080/> (whatever `NGINX_HOST_PORT` you set)
 - Django admin: <http://localhost:8080/admin/>
 - Postgres: internal (`db:5432`)
-- Chroma: internal (`chroma:8000`) — remove the service if not needed
+- Chroma: internal (`chroma:8000`), only while its compose profile is enabled
 
 **Three env files, three different jobs.** This trips people up, so:
 
@@ -211,7 +211,7 @@ TL;DR:
 
 ## Syncing prod data down to your dev machine
 
-The `Makefile` pulls Postgres + Chroma volume + media volume off the Pi over SSH and restores them into your native local Postgres and plain directories.
+The `Makefile` pulls Postgres + the media volume (+ the Chroma volume with `WITH_CHROMA=1`) off the Pi over SSH and restores them into your native local Postgres and plain directories.
 
 ```bash
 # One-liner (edit SSH_HOST + COMPOSE_PROJECT in the Makefile first)
@@ -219,7 +219,7 @@ make data-sync
 
 # Or step by step
 make data-dump          # -> dumps/
-make data-restore-local # -> local postgres + ./.chroma + backend/media
+make data-restore-local # -> local postgres + backend/media (+ ./.chroma with WITH_CHROMA=1)
 ```
 
 ---

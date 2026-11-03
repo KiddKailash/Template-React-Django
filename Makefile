@@ -1,5 +1,6 @@
 # Makefile — duplicate PROD onto a no-Docker dev machine.
-# Dump  : Postgres (pg_dump) + Chroma volume + media volume, pulled off the Pi.
+# Dump  : Postgres (pg_dump) + media volume (+ Chroma volume with WITH_CHROMA=1),
+#         pulled off the Pi.
 # Restore: into native local Postgres + plain directories on disk.
 #
 #   make data-sync            # ONE-LINER: dump prod -> replace local db/chroma/media
@@ -12,6 +13,12 @@
 #      are derived from the docker-compose project name (defaults to the folder
 #      name on the Pi). Set COMPOSE_PROJECT below to match.
 #   3. Postgres db + user + password must match backend/.env.
+
+# Chroma is off by default (compose profile `chroma`). Set WITH_CHROMA=1 here,
+# or per run (`make data-sync WITH_CHROMA=1`), once the project enables it.
+WITH_CHROMA      ?= 0
+CHROMA_DUMP       = $(if $(filter 1,$(WITH_CHROMA)),chroma-dump)
+CHROMA_RESTORE    = $(if $(filter 1,$(WITH_CHROMA)),chroma-restore-local)
 
 # --- Remote (Pi) settings ---
 SSH_HOST         ?= user@pi.tailXXXX.ts.net
@@ -58,7 +65,7 @@ RESOLVE_DB_IP = DB_IP="$(DB_IP)"; \
 
 ## ===== One-liner: pull prod and replace local =====
 data-sync: dumps-clean data-dump data-restore-local
-	@echo ">> data-sync complete: local db + chroma + media now mirror prod."
+	@echo ">> data-sync complete: local db + media$(if $(CHROMA_DUMP), + chroma) now mirror prod."
 
 dumps-clean:
 	@echo ">> Clearing $(DUMP_DIR)/"
@@ -68,7 +75,7 @@ dumps-clean:
 data-dump: db-dump vols-dump
 	@echo ">> Full prod snapshot complete -> $(DUMP_DIR)/"
 
-data-restore-local: db-restore-local chroma-restore-local media-restore-local
+data-restore-local: db-restore-local $(CHROMA_RESTORE) media-restore-local
 	@echo ">> Local environment restored."
 
 ## ===== Postgres =====
@@ -100,7 +107,7 @@ db-restore-local:
 	pg_restore --no-owner --no-acl -d "$(LOCAL_DBURL)" "$$LATEST"
 
 ## ===== File volumes (tarred off the Pi) =====
-vols-dump: chroma-dump media-dump
+vols-dump: $(CHROMA_DUMP) media-dump
 
 chroma-dump:
 	@mkdir -p $(DUMP_DIR)
