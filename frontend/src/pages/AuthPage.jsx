@@ -1,7 +1,8 @@
 import { useState, useContext } from 'react';
-import { useNavigate, Navigate } from 'react-router-dom';
+import { useNavigate, Navigate, useSearchParams } from 'react-router-dom';
 
 import UserContext from '../contexts/UserContext';
+import { safeNext } from '../utils/safeNext';
 import { SnackbarContext } from '../contexts/SnackbarContext';
 
 // MUI
@@ -22,6 +23,8 @@ import VisibilityOffIcon from '@mui/icons-material/VisibilityOff';
 
 const AuthPage = () => {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const next = safeNext(searchParams.get('next'));
   const { showSnackbar } = useContext(SnackbarContext);
   const { login, isLoggedIn } = useContext(UserContext);
 
@@ -38,14 +41,14 @@ const AuthPage = () => {
 
     if (result.success) {
       showSnackbar('Login successful', 'success');
-      navigate('/');
+      navigate(next, { replace: true });
     } else {
       showSnackbar(result.message || 'Login failed', 'error');
     }
   };
 
   if (isLoggedIn) {
-    return <Navigate to="/" />;
+    return <Navigate to={next} replace />;
   }
 
   return (

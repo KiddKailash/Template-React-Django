@@ -36,33 +36,12 @@ export default defineConfig({
         skipWaiting: true,
         maximumFileSizeToCacheInBytes: 1024 * 1024 * 10, // 10MB
         navigateFallbackDenylist: [/^\/media\//, /^\/api\//, /^\/admin\//, /^\/static\//],
-        runtimeCaching: [
-          {
-            urlPattern: /\/api\//,
-            handler: 'NetworkFirst',
-            options: {
-              cacheName: 'api-cache',
-              expiration: {
-                maxEntries: 50,
-                maxAgeSeconds: 60 * 60 * 24, // 24 hours
-              },
-              cacheableResponse: {
-                statuses: [0, 200],
-              },
-            },
-          },
-          {
-            urlPattern: /^https:\/\/fonts\.(?:googleapis|gstatic)\.com\/.*/i,
-            handler: 'CacheFirst',
-            options: {
-              cacheName: 'google-fonts',
-              expiration: {
-                maxEntries: 30,
-                maxAgeSeconds: 60 * 60 * 24 * 365, // 1 year
-              },
-            },
-          },
-        ],
+        // No runtime caching of /api/ (it used to be NetworkFirst, 24 h). API
+        // responses are per-user and authenticated: a cache keyed by URL alone
+        // serves one account's data to the next person who signs in on the
+        // device, and keeps it readable offline after "Sign out" or after the
+        // session is ended from another device. Add a narrowly scoped route
+        // (public, non-personal endpoints only) if a project needs offline reads.
       },
     }),
   ],

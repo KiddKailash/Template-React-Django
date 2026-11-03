@@ -2,7 +2,7 @@
 
 A pre-wired template for a Django REST backend + React (Vite + MUI PWA) frontend, deployed to a self-hosted Raspberry Pi 5 behind a Cloudflare Tunnel via Docker Compose and a self-hosted GitHub Actions runner.
 
-The template ships plugged-in and connected: JWT auth, health endpoint, protected routes, light/dark theme, PWA scaffolding, nginx reverse proxy, CI/CD workflow, dependabot, and a `make data-sync` one-liner for pulling prod state to your dev machine.
+The template ships plugged-in and connected: JWT auth with revocable device sessions (Settings → Devices, password change), rate limiting and security headers, health endpoint, protected routes, light/dark theme, PWA scaffolding, nginx reverse proxy, CI/CD workflow, dependabot, and a `make data-sync` one-liner for pulling prod state to your dev machine.
 
 For the architectural overview, read [ARCHITECTURE.md](./ARCHITECTURE.md). For UI decisions, read [DESIGN.md](./DESIGN.md). Agent-specific instructions are in [CLAUDE.md](./CLAUDE.md).
 
@@ -147,6 +147,8 @@ CHROMA_PORT=8001
 VITE_BACKEND_URL=http://localhost:8000
 ```
 
+Local dev only. In production leave it **empty**: the app then calls the relative `/api`, which nginx proxies to the backend on the same origin (and which the CSP's `connect-src 'self'` allows).
+
 ---
 
 ## Running the full stack via Docker
@@ -231,7 +233,7 @@ make data-restore-local # -> local postgres + backend/media (+ ./.chroma with WI
 cd backend
 uv run python manage.py runserver
 uv run python manage.py migrate
-uv run pytest                      # tests
+uv run pytest -n 2                 # tests (keep -n small on a Pi)
 uv run ruff check .
 uv run ruff format .
 
@@ -240,6 +242,7 @@ cd frontend
 npm run dev
 npm run build
 npm run lint
+npm test                           # Vitest
 
 # Full stack
 docker compose up --build

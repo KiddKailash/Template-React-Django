@@ -13,7 +13,6 @@ from django.contrib.auth.models import User
 from django.utils import timezone
 from rest_framework.test import APIClient
 
-
 # ---------------------------------------------------------------------------
 # Environment hardening — opt-in fixture for tests that explicitly want a
 # scrubbed environment. NOT autouse: a global scrub regresses any existing
@@ -32,6 +31,22 @@ def scrub_external_env(monkeypatch):
         "CHROMA_API_KEY",
     ):
         monkeypatch.delenv(key, raising=False)
+
+
+# ---------------------------------------------------------------------------
+# Cache isolation: DRF throttle counters live in the default cache, which
+# outlives a test. Without this, sign-ins add up across the suite and later
+# tests get 429 from the `auth` budget.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _clear_cache():
+    from django.core.cache import cache
+
+    cache.clear()
+    yield
+    cache.clear()
 
 
 # ---------------------------------------------------------------------------

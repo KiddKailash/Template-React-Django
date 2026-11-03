@@ -1,7 +1,7 @@
 /* eslint-disable react-refresh/only-export-components */
 import { createContext, useState, useEffect } from 'react';
 import { login as apiLogin } from '../services/authService';
-import { fetchCurrentUser } from '../services/api';
+import { clearTokens, fetchCurrentUser, logoutSession } from '../services/api';
 
 const UserContext = createContext();
 
@@ -42,14 +42,29 @@ export const UserProvider = ({ children }) => {
       console.error('Login error', error);
       return {
         success: false,
-        message: error.response?.data?.detail || 'Login failed',
+        message:
+          error.response?.status === 429
+            ? 'Too many sign-in attempts. Try again later.'
+            : error.response?.data?.detail || 'Login failed',
       };
     }
   };
 
-  const logout = () => {
-    localStorage.removeItem('access_token');
-    localStorage.removeItem('refresh_token');
+  // Ends this device's session on the server first, so the tokens stop working
+  // everywhere they might have been copied, then forgets them locally. Local
+  // sign-out still happens if the server cannot be reached.
+  const logout = async () => {
+    try {
+      await logoutSession();
+    } catch {
+      // Offline, or the session was already ended elsewhere.
+    }
+    clearTokens();
+    // Earlier template builds cached /api/ responses in the service worker
+    // (vite.config.js); drop that cache so nothing personal survives sign-out.
+    if (typeof caches !== 'undefined') {
+      caches.delete('api-cache').catch(() => {});
+    }
     setUser(null);
   };
 
