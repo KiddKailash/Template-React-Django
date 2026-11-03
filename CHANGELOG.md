@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- nginx can no longer be OOM-killed by a large upload, a large response or slow downloads. Temp-file spooling and autotuned TCP buffers both count against its 64 MB `mem_limit`: responses are never spooled (`proxy_max_temp_file_size 0`), bodies are limited to 8m (was 50m), with a commented streaming-upload location for bigger files, and the service's `sysctls` cap socket buffers at 512 KB. Measured on pi-zone 2026-11-03.
+
 ## [0.1.0] — Initial template
 
 ### Added
