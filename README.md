@@ -303,7 +303,7 @@ make data-sync
 | Business logic | `backend/core/utils/` |
 | LLM harness (OpenRouter + tool loop + audit) | `backend/llm/` |
 | `@read_only_tool` registry + AST validator | `backend/llm/utils/tools/` |
-| Per-user chat surface | `backend/chat/` |
+| Per-user chat surface (streamed turns, `/chat` page) | `backend/chat/`, `frontend/src/pages/Chat.jsx` |
 | MCP JSON-RPC server + bearer tokens | `backend/mcp_server/` |
 | Issue a new MCP token | `uv run python manage.py issue_mcp_token --name "Claude Desktop"` |
 | Cron entrypoint | `backend/cron/orchestrate.sh` |

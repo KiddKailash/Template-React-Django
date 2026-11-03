@@ -15,12 +15,22 @@ Cache hygiene:
 Cost accounting:
   - Each turn's OpenRouter usage block is summed into the final
     `LLMResponse` so callers see the full bill in one row.
+
+Progress:
+  - `on_event` (optional) is called as the loop runs, so a caller can
+    stream it (see `llm.utils.sse`; vocabulary from LLMStockAnalysis):
+      {"type": "iteration", "iteration": n}             a model call starts
+      {"type": "tool_start", "name", "args"}             a tool is about to run
+      {"type": "tool_result", "name", "args", "ok", "preview"}
+      {"type": "finalising", "reason": "max_turns"}     forced final answer
+    A callback that raises is logged and ignored: progress never breaks a turn.
 """
 
 from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any
@@ -43,6 +53,26 @@ class ToolCallTrace:
     arguments: dict[str, Any]
     result: Any
     error: str | None = None
+
+
+PREVIEW_CHARS = 200
+
+OnEvent = Callable[[dict[str, Any]], None]
+
+
+def _emit(on_event: OnEvent | None, event: dict[str, Any]) -> None:
+    if on_event is None:
+        return
+    try:
+        on_event(event)
+    except Exception:  # noqa: BLE001 - progress must never break the turn
+        logger.debug("tool_loop.progress_callback_failed", exc_info=True)
+
+
+def _preview(value: Any) -> str:
+    """A short, display-only rendering of a tool result."""
+    text = value if isinstance(value, str) else json.dumps(value, default=str)
+    return text if len(text) <= PREVIEW_CHARS else text[: PREVIEW_CHARS - 1] + "…"
 
 
 def _max_turns() -> int:
@@ -103,6 +133,7 @@ def chat_with_tools(
     tools: list[ToolSpec] | None = None,
     model: Model = "default",
     max_turns: int | None = None,
+    on_event: OnEvent | None = None,
 ) -> tuple[LLMResponse, list[ToolCallTrace]]:
     """Run the model with tools; return `(final_response, traces)`.
 
@@ -135,6 +166,7 @@ def chat_with_tools(
     turn_cap = int(max_turns) if max_turns is not None else _max_turns()
 
     for turn in range(1, turn_cap + 1):
+        _emit(on_event, {"type": "iteration", "iteration": turn})
         payload: dict[str, Any] = {
             "model": _model_id(model),
             "messages": messages,
@@ -178,14 +210,25 @@ def chat_with_tools(
             fn = call.get("function") or {}
             name = fn.get("name", "")
             raw_args = fn.get("arguments", "{}")
-            result, error = _dispatch_tool(name, raw_args, tools_by_name)
-            payload_for_model = {"error": error} if error is not None else {"result": result}
             try:
                 arg_dict = json.loads(raw_args or "{}")
                 if not isinstance(arg_dict, dict):
                     arg_dict = {"_raw": raw_args}
             except json.JSONDecodeError:
                 arg_dict = {"_raw": raw_args}
+            _emit(on_event, {"type": "tool_start", "name": name, "args": arg_dict})
+            result, error = _dispatch_tool(name, raw_args, tools_by_name)
+            payload_for_model = {"error": error} if error is not None else {"result": result}
+            _emit(
+                on_event,
+                {
+                    "type": "tool_result",
+                    "name": name,
+                    "args": arg_dict,
+                    "ok": error is None,
+                    "preview": _preview(error if error is not None else result),
+                },
+            )
             traces.append(
                 ToolCallTrace(
                     turn=turn,
@@ -205,6 +248,7 @@ def chat_with_tools(
 
     # Hit the cap — force one more call WITHOUT tools so the model
     # produces a final answer rather than another tool request.
+    _emit(on_event, {"type": "finalising", "reason": "max_turns"})
     final_payload = {
         "model": _model_id(model),
         "messages": messages,

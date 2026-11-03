@@ -156,3 +156,58 @@ def test_missing_api_key_raises(settings):
     settings.OPENROUTER_API_KEY = ""
     with pytest.raises(RuntimeError, match="OPENROUTER_API_KEY"):
         chat_with_tools(system="s", user="u", tools=[])
+
+
+def test_reports_progress_through_on_event():
+    """iteration / tool_start / tool_result per turn; the stream relays these."""
+    from llm.utils.tools import ToolSpec
+
+    spec = ToolSpec(
+        name="echo",
+        description="echo",
+        parameters={"type": "object", "properties": {"x": {"type": "integer"}}},
+        handler=lambda x: {"x": x},
+    )
+    responses = iter(
+        [
+            _completion(
+                tool_calls=[
+                    {
+                        "id": "c1",
+                        "type": "function",
+                        "function": {"name": "echo", "arguments": '{"x": 2}'},
+                    }
+                ]
+            ),
+            _completion(content="done"),
+        ]
+    )
+    events = []
+    with patch("llm.utils.tool_loop._post", side_effect=lambda p: next(responses)):
+        resp, _ = chat_with_tools(system="s", user="u", tools=[spec], on_event=events.append)
+    assert resp.content == "done"
+    assert [e["type"] for e in events] == ["iteration", "tool_start", "tool_result", "iteration"]
+    assert events[1] == {"type": "tool_start", "name": "echo", "args": {"x": 2}}
+    assert events[2]["ok"] is True and events[2]["preview"] == '{"x": 2}'
+
+
+def test_progress_callback_errors_never_break_the_turn():
+    def boom(_event):
+        raise RuntimeError("listener died")
+
+    with patch("llm.utils.tool_loop._post", return_value=_completion(content="ok")):
+        resp, _ = chat_with_tools(system="s", user="u", tools=[], on_event=boom)
+    assert resp.content == "ok"
+
+
+def test_reports_finalising_when_capped(settings):
+    from llm.utils.tools import ToolSpec
+
+    settings.LLM_MAX_TOOL_TURNS = 1
+    spec = ToolSpec(name="echo", description="e", parameters={"type": "object"}, handler=lambda: 1)
+    call = {"id": "c", "type": "function", "function": {"name": "echo", "arguments": "{}"}}
+    responses = iter([_completion(tool_calls=[call]), _completion(content="final")])
+    events = []
+    with patch("llm.utils.tool_loop._post", side_effect=lambda p: next(responses)):
+        chat_with_tools(system="s", user="u", tools=[spec], on_event=events.append)
+    assert events[-1] == {"type": "finalising", "reason": "max_turns"}

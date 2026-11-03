@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — streamed chat turns (from LLMStockAnalysis)
+- `POST /api/chat/stream/`: a chat turn as server-sent events (progress frames: `iteration`, `tool_start`, `tool_result`, `finalising`; a keep-alive every 15 s; `done` = the JSON endpoint's body). Fixes turns longer than 60 s failing with 504 (nginx) or 524 (Cloudflare) while the server kept working and paying: an 80 s turn now completes. `llm.utils.sse.stream_turn()` is reusable for any long LLM call; the turn is saved exactly once even if the client leaves.
+- `chat_with_tools(on_event=...)` progress callback; `/chat` page with live progress, streaming client with token refresh and safe JSON fallback; `featurePages` entry.
+
+### Fixed — chat
+- A failed turn left its `AgentRun` RUNNING forever and returned a 500 traceback; it is now FAILED, and the JSON endpoint answers 503 with a readable message. A missing `OPENROUTER_API_KEY` is a 503 before anything is written.
+
 ### Added — LLM harness + MCP server
 - `llm/` app: OpenRouter chat client with `HTTP-Referer`/`X-Title` attribution and Anthropic-style `cache_control` marker on the system block.
 - Multi-turn `chat_with_tools()` dispatcher with `LLM_MAX_TOOL_TURNS` cap and a final forced no-tools turn.

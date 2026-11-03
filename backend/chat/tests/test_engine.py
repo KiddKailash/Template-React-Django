@@ -14,6 +14,12 @@ from llm.models import AgentRun
 from llm.utils.openrouter import LLMResponse
 
 
+@pytest.fixture(autouse=True)
+def _llm_configured(settings):
+    # The views refuse with 503 before doing anything when no key is set.
+    settings.OPENROUTER_API_KEY = "test-key"
+
+
 @pytest.fixture
 def user(db):
     User = get_user_model()
@@ -105,3 +111,42 @@ def test_today_thread_returns_only_this_users_messages(authed_client, user, db):
     assert r.status_code == 200
     contents = [m["content"] for m in r.json()["messages"]]
     assert contents == ["mine"]
+
+
+def test_send_unconfigured_is_503_and_writes_nothing(authed_client, settings):
+    settings.OPENROUTER_API_KEY = ""
+    r = authed_client.post("/api/chat/", {"message": "hi"}, format="json")
+    assert r.status_code == 503
+    assert not ChatMessage.objects.exists()
+    assert not AgentRun.objects.exists()
+
+
+def test_send_failure_is_503_and_marks_the_run_failed(authed_client):
+    import requests
+
+    with patch("chat.utils.engine.chat_with_tools", side_effect=requests.Timeout("slow")):
+        r = authed_client.post("/api/chat/", {"message": "hi"}, format="json")
+    assert r.status_code == 503
+    assert "too long" in r.json()["detail"]
+    run = AgentRun.objects.get()
+    assert run.status == AgentRun.Status.FAILED
+    assert "Timeout" in run.error
+
+
+def test_answer_runs_the_whole_turn_for_non_http_callers(user):
+    """`answer()` is the one-call API for cron jobs, scripts and agents."""
+    from chat.utils.engine import answer
+
+    with patch("chat.utils.engine.chat_with_tools", return_value=_mock_llm("done")):
+        result = answer(user=user, question="hi")
+    assert result.assistant_message.content == "done"
+    assert AgentRun.objects.get().status == AgentRun.Status.COMPLETED
+
+
+def test_answer_marks_the_run_failed_and_reraises(user):
+    from chat.utils.engine import answer
+
+    with patch("chat.utils.engine.chat_with_tools", side_effect=RuntimeError("boom")):
+        with pytest.raises(RuntimeError):
+            answer(user=user, question="hi")
+    assert AgentRun.objects.get().status == AgentRun.Status.FAILED

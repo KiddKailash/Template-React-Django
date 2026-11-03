@@ -154,7 +154,8 @@ backend/
 │   ├── tests/
 │   └── utils/
 │       ├── openrouter.py        chat() — LLMResponse, cache_control marker
-│       ├── tool_loop.py         chat_with_tools() — multi-turn dispatcher
+│       ├── tool_loop.py         chat_with_tools() — multi-turn dispatcher, on_event progress
+│       ├── sse.py               stream_turn() — run a turn on a worker thread, stream it as SSE
 │       ├── prompts.py           Domain-neutral defaults
 │       ├── cost_cap.py          precheck_only / record_after_call (monthly USD)
 │       ├── agent.py             run_agent() high-level entry point
@@ -164,8 +165,8 @@ backend/
 │           └── builtin.py       Example tools (current_time, list_recent_users)
 ├── chat/                        Per-user chat surface using the harness
 │   ├── models.py                ChatMessage (user FK, date-scoped thread)
-│   ├── views.py                 POST /api/chat/ + GET /api/chat/today/
-│   └── utils/engine.py          answer() — persist, call harness, handle cap
+│   ├── views.py                 POST /api/chat/stream/ (SSE) + POST /api/chat/ + GET today/
+│   └── utils/engine.py          start/run/finish/fail_turn phases; answer() runs them all
 └── mcp_server/                  MCP JSON-RPC endpoint (Streamable HTTP, 2025-03-26)
     ├── models.py                McpToken, McpCallLog (append-only audit)
     ├── views.py                 mcp_endpoint + McpTokenViewSet
@@ -210,6 +211,41 @@ Boot-time safety: llm.apps.LlmConfig.ready() force-imports the registry and runs
 an AST walker over every tool body. Any .save / .delete / .create / .update / …
 call in a @read_only_tool aborts boot with file+line.
 ```
+
+### 3.2.1a Streaming chat turns (from LLMStockAnalysis)
+
+**Why.** A turn is up to `LLM_MAX_TOOL_TURNS` + 1 model calls of up to
+`OPENROUTER_REQUEST_TIMEOUT` each, minutes in the worst case. A plain JSON
+request is silent until the end, and every hop gives up first: nginx at 60 s
+(`proxy_read_timeout`), Cloudflare at ~100 s (524). Measured on this stack with
+an 80 s turn: `POST /api/chat/` → **504 at 60.0 s**, while the server finished
+and paid for the answer anyway; `POST /api/chat/stream/` → `done` at 81 s.
+
+**How.** `ChatStreamView` does the database work on the request thread
+(`start_turn`: cost-cap precheck, user message, AgentRun), then
+`llm.utils.sse.stream_turn()` runs only the tool loop on a worker thread and
+relays its `on_event` progress as SSE frames:
+
+```
+event: start → iteration → tool_start → tool_result → … → finalising? → done | error
+: keep-alive   (every 15 s of silence: keeps nginx/Cloudflare/browsers from timing out)
+```
+
+`done` is exactly `POST /api/chat/`'s body, which stays as the fallback.
+`finish_turn` (save the answer and its cost) or `fail_turn` (mark the run
+FAILED) runs **exactly once**: on the request thread normally, or on the worker
+if the client left mid-turn — a turn outlives its listener and is never lost or
+saved twice. No nginx change is needed: the response sets `X-Accel-Buffering:
+no`, which turns off nginx buffering for that response, and `text/event-stream`
+is not in `gzip_types`. Gunicorn's `--timeout` does not cut a long stream (the
+gthread worker heartbeats from its main loop; verified with an 80 s turn under
+`--timeout 60`).
+
+**Client** (`frontend/src/services/chat.js`, `pages/Chat.jsx`): `fetch` +
+`ReadableStream` (EventSource cannot POST or send the bearer token). A 401
+refreshes the token and streams again; a failure before the first frame falls
+back to JSON; never after a frame (the turn is already running, and would be
+billed and saved twice) or on a deliberate 4xx.
 
 ### 3.2.2 MCP server — how requests flow
 
@@ -292,7 +328,8 @@ All endpoints under `/api/`. JSON in, JSON out. `IsAuthenticated` unless noted.
 - `GET  /api/me/` — returns the current user.
 
 **Chat (LLM harness demo surface)**
-- `POST /api/chat/`         — send a message; response includes the assistant reply.
+- `POST /api/chat/stream/`  — send a message; the turn streams back as SSE (§3.2.1a). Use this.
+- `POST /api/chat/`         — the same turn as one JSON response (fallback; times out behind nginx/Cloudflare past 60–100 s).
 - `GET  /api/chat/today/`   — today's thread for the requesting user.
 
 **MCP JSON-RPC (bearer-token auth; not JWT)**
